@@ -7,7 +7,7 @@ import gzip
 def dataIterator(feature_file,label_file,dictionary,batch_size,batch_Imagesize,maxlen,maxImagesize):
     
     fp=open(feature_file,'rb')
-    features=pkl.load(fp)
+    features=pkl.load(fp, encoding='latin1')
     fp.close()
 
     fp2=open(label_file,'r')
@@ -17,10 +17,10 @@ def dataIterator(feature_file,label_file,dictionary,batch_size,batch_Imagesize,m
     targets={}
     # map word to int with dictionary
     for l in labels:
-        tmp=l.strip().split()
+        tmp=l.strip().split('\t')
         uid=tmp[0]
         w_list=[]
-        for w in tmp[1:]:
+        for w in tmp[1].split(' '):
             if w in dictionary:
                 w_list.append(dictionary[w])
             else:
