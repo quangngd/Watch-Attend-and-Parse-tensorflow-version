@@ -1,2 +1,6 @@
 combined-data
 log*
+result
+__pycache__
+data.pyc
+quick-test-set

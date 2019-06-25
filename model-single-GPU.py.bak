@@ -15,9 +15,6 @@ import argparse
 
 rng = np.random.RandomState(int(time.time()))
 
-# for that one assert line out of nowhere?
-dictLen = None
-
 """
 following three functions:
 norm_weight(),
@@ -673,7 +670,7 @@ class WAP:
         self, p, w, h, alpha, ctx0, h_0, k, maxlen, stochastic, session, training
     ):
 
-        global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
+        global anno, infer_y, h_pre, alpha_past, if_trainning
         
         sample = []
         sample_score = []
@@ -724,7 +721,7 @@ class WAP:
                 ranks_flat = cand_flat.argsort()[: (k - dead_k)]
                 voc_size = next_p.shape[1]
 
-                assert voc_size == dictLen
+                assert voc_size == 111
 
                 trans_indices = ranks_flat // voc_size
                 word_indices = ranks_flat % voc_size
@@ -780,11 +777,10 @@ class WAP:
 
 
 def main(args):
-    global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
+    global anno, infer_y, h_pre, alpha_past, if_trainning
 
 
     worddicts = load_dict(args.dictPath)
-    dictLen = len(worddicts)
     worddicts_r = [None] * len(worddicts)
     for kk, vv in worddicts.items():
         worddicts_r[vv] = kk
@@ -809,8 +805,7 @@ def main(args):
         maxImagesize=300000,
     )
 
-    print("train lenth is ", len(train))
-    print("valid lenth is ", len(valid))
+    print("train lenght is ", len(train))
 
     x = tf.placeholder(tf.float32, shape=[None, None, None, 1])
 
@@ -858,7 +853,7 @@ def main(args):
         256,
         256,
         annotation.shape.as_list()[3],
-        dictLen,
+        111,
         if_trainning,
     )
 
@@ -894,13 +889,13 @@ def main(args):
     uidx = 0
     cost_s = 0
     dispFreq = 100 if args.dispFreq is None else args.dispFreq
-    saveFreq = len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
-    sampleFreq = len(train) * args.epochSampleRatio if args.sampleFreq is None else args.sampleFreq
-    validFreq = len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
+    saveFreq = len(train) if args.saveFreq is None else args.saveFreq
+    sampleFreq = len(train) if args.sampleFreq is None else args.sampleFreq
+    validFreq = len(train) if args.validFreq is None else args.validFreq
     history_errs = []
     estop = False
     halfLrFlag = 0
-    patience = 15 if args.patience is None else args.patience
+    patience = 15 if args.patience is not None else args.patience
     lrate = 2e-4
     logPath = "./log.txt" if args.logPath is None else args.logPath
     log = open(logPath, "w")
@@ -953,9 +948,7 @@ def main(args):
                     cost_s = 0
 
                 if np.mod(uidx, sampleFreq) == 0:
-                    print('Start sampling...')
-                    _t = time.time()
-                    fpp_sample = open(os.path.join(args.resultPath, "valid_decode_result.txt"), "w")
+                    fpp_sample = open("./result/valid_decode_result.txt", "w")
                     valid_count_idx = 0
                     for batch_x, batch_y in valid:
                         for xx in batch_x:
@@ -999,11 +992,8 @@ def main(args):
                     print("valid set decode done")
                     log.write("valid set decode done\n")
                     log.flush()
-                    print(f"Done sampling, took {time.time() - _t}.")
 
                 if np.mod(uidx, validFreq) == 0:
-                    print('Start validating...')
-                    _t = time.time()
                     probs = []
                     for batch_x, batch_y in valid:
                         batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(
@@ -1022,21 +1012,16 @@ def main(args):
                         probs.append(pprobs)
                     valid_errs = np.array(probs)
                     valid_err_cost = valid_errs.mean()
-                    print("python3 compute-wer.py "
-                        + os.path.join(args.resultPath, "valid_decode_result.txt")
-                        + " "
-                        + args.validCaptionPath
-                        + " "
-                        + os.path.join(args.resultPath, "valid.wer"))
                     os.system(
-                        "python3 compute-wer.py "
-                        + os.path.join(args.resultPath, "valid_decode_result.txt")
+                        "python3.4 compute-wer.py "
+                        + "/result/valid_decode_result.txt"
                         + " "
                         + args.validCaptionPath
                         + " "
-                        + os.path.join(args.resultPath, "valid.wer")
+                        + args.path
+                        + "/result/valid.wer"
                     )
-                    fpp = open(os.path.join(args.resultPath, "valid.wer"))
+                    fpp = open("./result/valid.wer")
                     stuff = fpp.readlines()
                     fpp.close()
                     m = re.search("WER (.*)\n", stuff[0])
@@ -1083,7 +1068,6 @@ def main(args):
                         + "\n"
                     )
                     log.flush()
-                    print(f"Done validating, took {time.time() - _t}.")
             if estop:
                 break
 
@@ -1095,7 +1079,6 @@ if __name__ == "__main__":
     parser.add_argument("trainCaptionPath", type=str)
     parser.add_argument("validPklPath", type=str)
     parser.add_argument("validCaptionPath", type=str)
-    parser.add_argument("resultPath", type=str)
     parser.add_argument("--logPath", type=str)
     parser.add_argument("--batch_size", type=int, default=6)
     parser.add_argument("--dispFreq", type=int)
@@ -1103,10 +1086,6 @@ if __name__ == "__main__":
     parser.add_argument("--sampleFreq", type=int)
     parser.add_argument("--validFreq", type=int)
     parser.add_argument("--patience", type=int)
-    parser.add_argument("--epochDispRatio", type=int, default = 1)
-    parser.add_argument("--epochSampleRatio", type=int, default = 1)
-    parser.add_argument("--epochValidRatio", type=int, default = 1)
     (args, unknown) = parser.parse_known_args()
-    print(f'Run with args {args}')
     main(args)
 
