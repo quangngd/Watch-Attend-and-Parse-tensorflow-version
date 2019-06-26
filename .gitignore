@@ -6,3 +6,4 @@ data.pyc
 quick-test-set
 *.pkl
 *.txt
+data/*
