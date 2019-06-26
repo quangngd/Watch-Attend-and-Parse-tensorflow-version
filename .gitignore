@@ -4,3 +4,5 @@ result
 __pycache__
 data.pyc
 quick-test-set
+*.pkl
+*.txt
