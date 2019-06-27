@@ -901,7 +901,7 @@ def main(args):
     estop = False
     halfLrFlag = 0
     patience = 15 if args.patience is None else args.patience
-    lrate = 2e-4
+    lrate = args.lr
     logPath = "./log.txt" if args.logPath is None else args.logPath
     log = open(logPath, "w")
 
@@ -955,7 +955,7 @@ def main(args):
                 if np.mod(uidx, sampleFreq) == 0:
                     print('Start sampling...')
                     _t = time.time()
-                    fpp_sample = open(os.path.join(args.resultPath, "valid_decode_result.txt"), "w")
+                    fpp_sample = open(os.path.join(args.resultPath, f"{args.resultFileName}.txt"), "w")
                     valid_count_idx = 0
                     for batch_x, batch_y in valid:
                         for xx in batch_x:
@@ -1022,21 +1022,15 @@ def main(args):
                         probs.append(pprobs)
                     valid_errs = np.array(probs)
                     valid_err_cost = valid_errs.mean()
-                    print("python3 compute-wer.py "
-                        + os.path.join(args.resultPath, "valid_decode_result.txt")
-                        + " "
-                        + args.validCaptionPath
-                        + " "
-                        + os.path.join(args.resultPath, "valid.wer"))
                     os.system(
                         "python3 compute-wer.py "
-                        + os.path.join(args.resultPath, "valid_decode_result.txt")
+                        + os.path.join(args.resultPath, f"{args.resultFileName}.txt")
                         + " "
                         + args.validCaptionPath
                         + " "
-                        + os.path.join(args.resultPath, "valid.wer")
+                        + os.path.join(args.resultPath, f"{args.resultFileName}.wer")
                     )
-                    fpp = open(os.path.join(args.resultPath, "valid.wer"))
+                    fpp = open(os.path.join(args.resultPath, f"{args.resultFileName}.wer"))
                     stuff = fpp.readlines()
                     fpp.close()
                     m = re.search("WER (.*)\n", stuff[0])
@@ -1106,6 +1100,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochDispRatio", type=int, default = 1)
     parser.add_argument("--epochSampleRatio", type=int, default = 1)
     parser.add_argument("--epochValidRatio", type=int, default = 1)
+    parser.add_argument("--lr", type=float, default = 1)
+    parser.add_argument("--resultFileName", type=str, default = "valid")
     (args, unknown) = parser.parse_known_args()
     print(f'Run with args {args}')
     main(args)
