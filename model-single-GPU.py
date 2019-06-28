@@ -794,9 +794,9 @@ def main(args):
         args.trainCaptionPath,
         worddicts,
         batch_size=args.batch_size,
-        batch_Imagesize=300000,
-        maxlen=50,
-        maxImagesize=300000,
+        batch_Imagesize=500000,
+        maxlen=150,
+        maxImagesize=500000,
     )
 
     valid, valid_uid_list = dataIterator(
@@ -804,9 +804,9 @@ def main(args):
         args.validCaptionPath,
         worddicts,
         batch_size=args.batch_size,
-        batch_Imagesize=300000,
-        maxlen=50,
-        maxImagesize=300000,
+        batch_Imagesize=500000,
+        maxlen=150,
+        maxImagesize=500000,
     )
 
     print("train lenth is ", len(train))
