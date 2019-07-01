@@ -905,6 +905,10 @@ def main(args):
     logPath = "./log.txt" if args.logPath is None else args.logPath
     log = open(logPath, "w")
 
+
+    log.write(str(vars(args)))
+    log.write(str(patienc)e)
+    log.write(str(lr))
     with tf.Session(config=config) as sess:
         sess.run(init)
         for epoch in range(max_epoch):
@@ -936,7 +940,7 @@ def main(args):
                 if np.mod(uidx, dispFreq) == 0:
                     cost_s /= dispFreq
                     print(
-                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate
+                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate, "Patience ", patience
                     )
                     log.write(
                         "Epoch "
@@ -947,6 +951,8 @@ def main(args):
                         + str(cost_s)
                         + " Lr "
                         + str(lrate)
+                        + " Patience "
+                        + str(patience)
                         + "\n"
                     )
                     log.flush()
