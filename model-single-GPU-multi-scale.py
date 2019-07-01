@@ -424,8 +424,8 @@ class Attender:
             tf.tensordot(Ft, self.U_f, axes=1) + self.U_f_b
         )  # [batch, h, w, dim_attend]
 
-        print(f"getctxA annoA {annotation4ctx.shape.as_list()}")
-        print(f"getctxA U_a {self.U_a.shape.as_list()}")
+        # print(f"getctxA annoA {annotation4ctx.shape.as_list()}")
+        # print(f"getctxA U_a {self.U_a.shape.as_list()}")
         #### calculate $U_a x a_i$ ####
         watch_vector = (
             tf.tensordot(annotation4ctx, self.U_a, axes=1) + self.U_a_b
@@ -439,11 +439,11 @@ class Attender:
             :, None, None, :
         ]  # [batch, None, None, dim_attend]
 
-        print(f'''getctxA 
-        coverage_vector: {coverage_vector.shape.as_list()}
-        watch_vector: {watch_vector.shape.as_list()}
-        speller_vector: {speller_vector.shape.as_list()}
-        ''')
+        # print(f'''getctxA 
+        # coverage_vector: {coverage_vector.shape.as_list()}
+        # watch_vector: {watch_vector.shape.as_list()}
+        # speller_vector: {speller_vector.shape.as_list()}
+        # ''')
 
         test = speller_vector + watch_vector
         test = test + coverage_vector
@@ -493,8 +493,8 @@ class Attender:
         )  # [batch, h, w, dim_attend]
 
         #### calculate $U_a x a_i$ ####
-        print(f"getctxb annoB {annotation4ctx.shape.as_list()}")
-        print(f"getctxb UB_a {self.UB_a.shape.as_list()}")
+        # print(f"getctxb annoB {annotation4ctx.shape.as_list()}")
+        # print(f"getctxb UB_a {self.UB_a.shape.as_list()}")
         watch_vector = (
             tf.tensordot(annotation4ctx, self.UB_a, axes=1) + self.UB_a_b
         )  # [batch, h, w, dim_attend]
@@ -793,8 +793,8 @@ class WAP:
             axis=0,
         )
         new_emb_y = emb_shift
-        print(a_m.shape)
-        print(B_mask.shape)
+        # print(a_m.shape)
+        # print(B_mask.shape)
         anno_mean = (
             tf.concat(
                 [   tf.reduce_sum(A_annotation * a_m[:, :, :, None], axis=[1, 2]),
@@ -874,7 +874,7 @@ class WAP:
         pre_h = z1 * sample_h_pre + (1.0 - z1) * pre_h_proposal
 
 
-        tf.print(sample_annotationA, alphaA_past_pre)
+        # tf.print(sample_annotationA, alphaA_past_pre)
         contextA, _, alphaA_past = self.parser.attender.get_context(
             sample_annotationA, pre_h, alphaA_past_pre, None
         )  # [batch, dim_ctx]
@@ -1179,7 +1179,7 @@ def main(args):
     with tf.control_dependencies(update_ops):
         trainer = optimizer.minimize(cost)
 
-    max_epoch = 200
+    max_epoch = 500
 
     config = tf.ConfigProto()
 
@@ -1203,7 +1203,7 @@ def main(args):
     log = open(logPath, "w")
 
     log.write(str(vars(args)))
-    log.write(str(patienc)e)
+    log.write(str(patience))
     log.write(str(lr))
     with tf.Session(config=config) as sess:
         writer = tf.summary.FileWriter('logs', sess.graph)
@@ -1237,7 +1237,7 @@ def main(args):
                 if np.mod(uidx, dispFreq) == 0:
                     cost_s /= dispFreq
                     print(
-                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate, "Patience ", patience
+                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate
                     )
                     log.write(
                         "Epoch "
@@ -1248,8 +1248,6 @@ def main(args):
                         + str(cost_s)
                         + " Lr "
                         + str(lrate)
-                        + " Patience "
-                        + str(patience)
                         + "\n"
                     )
                     cost_s = 0
@@ -1335,7 +1333,7 @@ def main(args):
                         + " "
                         + os.path.join(args.resultPath, f"{args.resultFileName}.wer")
                     )
-                    fpp = open(os.path.join(args.resultPath, "valid.wer"))
+                    fpp = open(os.path.join(args.resultPath, f"{args.resultFileName}.wer"))
                     stuff = fpp.readlines()
                     fpp.close()
                     m = re.search("WER (.*)\n", stuff[0])
@@ -1358,7 +1356,7 @@ def main(args):
                     ):
                         bad_counter += 1
                         if bad_counter > patience:
-                            if halfLrFlag == 2:
+                            if halfLrFlag == 3:
                                 print("Early Stop!")
                                 log.write("Early Stop!\n")
                                 log.flush()
@@ -1371,7 +1369,7 @@ def main(args):
                                 bad_counter = 0
                                 lrate = lrate / 10
                                 halfLrFlag += 1
-
+                    print(f"bad_counter {bad_counter}")
                     print(
                         "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
                         % (valid_per, valid_sacc, valid_err_cost)

@@ -907,7 +907,7 @@ def main(args):
 
 
     log.write(str(vars(args)))
-    log.write(str(patienc)e)
+    log.write(str(patience))
     log.write(str(lr))
     with tf.Session(config=config) as sess:
         sess.run(init)
@@ -940,7 +940,7 @@ def main(args):
                 if np.mod(uidx, dispFreq) == 0:
                     cost_s /= dispFreq
                     print(
-                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate, "Patience ", patience
+                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate
                     )
                     log.write(
                         "Epoch "
@@ -951,8 +951,6 @@ def main(args):
                         + str(cost_s)
                         + " Lr "
                         + str(lrate)
-                        + " Patience "
-                        + str(patience)
                         + "\n"
                     )
                     log.flush()
@@ -1072,7 +1070,7 @@ def main(args):
                                 bad_counter = 0
                                 lrate = lrate / 10
                                 halfLrFlag += 1
-
+                    print(f"bad_counter {bad_counter}")
                     print(
                         "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
                         % (valid_per, valid_sacc, valid_err_cost)
