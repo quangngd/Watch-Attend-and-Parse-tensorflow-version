@@ -78,7 +78,7 @@ class Watcher_train:
         self.input_conv_stride = input_conv_stride
         self.input_conv_filters = input_conv_filters
         self.B_branch_from = B_option["branch_from"]
-        self.B_growth_rate = B_option["growth_rate"] #k
+        self.B_growth_rate = B_option["growth_rate"]  # k
         self.B_level = B_option["level"]
 
     def bound(self, nin, nout, kernel):
@@ -86,9 +86,9 @@ class Watcher_train:
         fout = nout * kernel[0] * kernel[1]
         return np.sqrt(6.0 / (fin + fout))
 
-    def dense_net(self, input_x, mask_x):  
+    def dense_net(self, input_x, mask_x):
         """
-        Return dense_out = [A, B]
+        Return dense_out = A, B
 
         Parameters:
         input_x: [batch, h, w, c=1]
@@ -243,18 +243,18 @@ class Watcher_train:
 
             if i == self.B_branch_from:
                 B_name = x.name
-                B_mask = tf.identity(mask_x )
-            
+                B_mask = tf.identity(mask_x)
+
             if i < self.blocks - 1:
                 x = tf.layers.average_pooling2d(
                     inputs=x, pool_size=[2, 2], strides=2, padding="SAME"
                 )
                 dense_out = x
                 mask_x = mask_x[:, 0::2, 0::2]
-            
+
             # print(f'x {x.shape.as_list()}')
             # print(f'dense {dense_out.shape.as_list()}')
-        
+
         B_out = tf.get_default_graph().get_tensor_by_name(B_name)
         B = B_out
         for j in range(self.B_level):
@@ -330,12 +330,14 @@ class Watcher_train:
 class Attender:
     def __init__(
         self,
-        channels,  # output of Watcher | [batch, h, w, channels]
+        channelsA,
+        channelsB,  # output of Watcher | [batch, h, w, channels]
         dim_decoder,  # decoder hidden state:$h_{t-1}$ | [batch, dec_dim]
         dim_attend,  # ^
     ):
 
-        self.channelsA, self.channelsB = channels
+        self.channelsA = channelsA
+        self.channelsB = channelsB
 
         self.coverage_kernel = [11, 11]  # kernel size of $Q$
         self.coverage_filters = dim_attend  # filter numbers of $Q$ | 512
@@ -406,7 +408,7 @@ class Attender:
             name="alphaB_past_filter",
         )
 
-    def get_context(self, annotation4ctx, h_t_1, alpha_past4ctx, a_mask):
+    def get_contextA(self, annotation4ctx, h_t_1, alpha_past4ctx, a_mask):
         #               ( annotation_one, pre_h, alpha_past_one, a_mask )
         #       f_catt  (         {A}   ,s_hat_t )
 
@@ -424,8 +426,6 @@ class Attender:
             tf.tensordot(Ft, self.U_f, axes=1) + self.U_f_b
         )  # [batch, h, w, dim_attend]
 
-        # print(f"getctxA annoA {annotation4ctx.shape.as_list()}")
-        # print(f"getctxA U_a {self.U_a.shape.as_list()}")
         #### calculate $U_a x a_i$ ####
         watch_vector = (
             tf.tensordot(annotation4ctx, self.U_a, axes=1) + self.U_a_b
@@ -439,17 +439,9 @@ class Attender:
             :, None, None, :
         ]  # [batch, None, None, dim_attend]
 
-        # print(f'''getctxA 
-        # coverage_vector: {coverage_vector.shape.as_list()}
-        # watch_vector: {watch_vector.shape.as_list()}
-        # speller_vector: {speller_vector.shape.as_list()}
-        # ''')
-
         test = speller_vector + watch_vector
         test = test + coverage_vector
-        tanh_vector = tf.tanh(
-            test
-        )  # [batch, h, w, dim_attend] (in formula 18)
+        tanh_vector = tf.tanh(test)  # [batch, h, w, dim_attend] (in formula 18)
 
         e_ti = (
             tf.tensordot(tanh_vector, self.V_a, axes=1) + self.V_a_b
@@ -475,10 +467,10 @@ class Attender:
         return context, alpha, alpha_past4ctx
 
     def get_contextB(self, annotation4ctx, h_t_1, alpha_past4ctx, a_mask):
-    #               ( annotation_one, pre_h, alpha_past_one, a_mask )
-    #       f_catt  (         {B}   ,s_hat_t )
+        #               ( annotation_one, pre_h, alpha_past_one, a_mask )
+        #       f_catt  (         {B}   ,s_hat_t )
 
-    #### calculate $U_f x f_i$ ####
+        #### calculate $U_f x f_i$ ####
         alpha_past_4d = alpha_past4ctx[:, :, :, None]
 
         Ft = tf.nn.conv2d(
@@ -517,7 +509,7 @@ class Attender:
 
         alpha = tf.exp(e_ti)
 
-        alpha = tf.squeeze(alpha, axis=3) # eq 19
+        alpha = tf.squeeze(alpha, axis=3)  # eq 19
 
         if a_mask is not None:
             alpha = alpha * a_mask
@@ -540,11 +532,11 @@ class Parser:
 
         self.attender = attender  # inner-instance of Attender to provide context
         self.contextA_dim = contextA_dim  # context dime 684
+        self.contextB_dim = contextB_dim
         self.hidden_dim = hidden_dim  # dim of hidden state  256
         self.word_dim = word_dim  # dim of embedding word 256
 
-        self.contextB_dim = contextB_dim
-
+        #### GRU1 ####
         self.W_yz_yr = tf.Variable(
             np.concatenate(
                 [
@@ -589,7 +581,8 @@ class Parser:
         )  # [2 * dim_hidden, ]
 
         self.W_c_z_r = tf.Variable(
-            norm_weight(self.contextA_dim + self.contextB_dim, 2 * self.hidden_dim), name="W_c_z_r"
+            norm_weight(self.contextA_dim + self.contextB_dim, 2 * self.hidden_dim),
+            name="W_c_z_r",
         )
 
         self.U_rh_nl = tf.Variable(ortho_weight(self.hidden_dim), name="U_rh_nl")
@@ -598,33 +591,38 @@ class Parser:
         )
 
         self.W_c_h_nl = tf.Variable(
-            norm_weight(self.contextA_dim + self.contextB_dim, self.hidden_dim), name="W_c_h_nl"
+            norm_weight(self.contextA_dim + self.contextB_dim, self.hidden_dim),
+            name="W_c_h_nl",
         )
 
-    def get_ht_ctx(self, emb_y, target_hidden_state_0, annotations, a_m, y_m, B_annotation, B_mask):
+    def get_ht_ctx(
+        self, emb_y, target_hidden_state_0, A_annotation, a_m, y_m, B_annotation, B_mask
+    ):
         res = tf.scan(
             self.one_time_step,
             elems=(emb_y, y_m),
             initializer=(
                 # Main
                 target_hidden_state_0,
-                tf.zeros([tf.shape(annotations)[0], self.contextA_dim + self.contextB_dim]),
+                tf.zeros(
+                    [tf.shape(A_annotation)[0], self.contextA_dim + self.contextB_dim]
+                ),
                 # A
                 tf.zeros(
                     [
-                        tf.shape(annotations)[0],
-                        tf.shape(annotations)[1],
-                        tf.shape(annotations)[2],
+                        tf.shape(A_annotation)[0],
+                        tf.shape(A_annotation)[1],
+                        tf.shape(A_annotation)[2],
                     ]
                 ),
                 tf.zeros(
                     [
-                        tf.shape(annotations)[0],
-                        tf.shape(annotations)[1],
-                        tf.shape(annotations)[2],
+                        tf.shape(A_annotation)[0],
+                        tf.shape(A_annotation)[1],
+                        tf.shape(A_annotation)[2],
                     ]
                 ),
-                annotations,
+                A_annotation,
                 a_m,
                 # B
                 tf.zeros(
@@ -642,95 +640,106 @@ class Parser:
                     ]
                 ),
                 B_annotation,
-                B_mask
+                B_mask,
             ),
         )
 
         return res
 
-    def one_time_step(self, tuple_h0_ctx_alpha_alpha_past_annotation, tuple_emb_mask):
-        target_hidden_state_0 = tuple_h0_ctx_alpha_alpha_past_annotation[0]
+    def one_time_step(self, past_state, inp):
+        s_t_1 = past_state[0]
         # context
         # alpha_A
-        alpha_past_one = tuple_h0_ctx_alpha_alpha_past_annotation[3]
-        annotation_one = tuple_h0_ctx_alpha_alpha_past_annotation[4]
-        a_mask = tuple_h0_ctx_alpha_alpha_past_annotation[5]
+        alpha_past_A = past_state[3]
+        annotation_A = past_state[4]
+        A_mask = past_state[5]
         # alpha_B
-        alpha_past_B = tuple_h0_ctx_alpha_alpha_past_annotation[7]
-        annotation_B = tuple_h0_ctx_alpha_alpha_past_annotation[8]
-        B_mask = tuple_h0_ctx_alpha_alpha_past_annotation[9]
+        alpha_past_B = past_state[7]
+        annotation_B = past_state[8]
+        B_mask = past_state[9]
 
-        emb_y, y_mask = tuple_emb_mask
+        emb_y, y_mask = inp
         ##################### GRU1 ##############################
-        emb_y_z_r_vector = (
+        emby_zr_vector = (
             tf.tensordot(emb_y, self.W_yz_yr, axes=1) + self.b_yz_yr
         )  # [batch, 2 * dim_decoder]
-        hidden_z_r_vector = tf.tensordot(
-            target_hidden_state_0, self.U_hz_hr, axes=1
+        st1_zr_vector = tf.tensordot(
+            s_t_1, self.U_hz_hr, axes=1
         )  # [batch, 2 * dim_decoder]
-        pre_z_r_vector = tf.sigmoid(
-            emb_y_z_r_vector + hidden_z_r_vector
+        pre_zr_vector = tf.sigmoid(
+            emby_zr_vector + st1_zr_vector
         )  # [batch, 2 * dim_decoder]  # eq 3 4
 
-        r1 = pre_z_r_vector[:, : self.hidden_dim]  # [batch, dim_decoder]
-        z1 = pre_z_r_vector[:, self.hidden_dim :]  # [batch, dim_decoder]
+        r1 = pre_zr_vector[:, : self.hidden_dim]  # [batch, dim_decoder]
+        z1 = pre_zr_vector[:, self.hidden_dim :]  # [batch, dim_decoder]
 
-        emb_y_h_vector = (
+        emby_h_vector = (
             tf.tensordot(emb_y, self.W_yh, axes=1) + self.b_yh
         )  # [batch, dim_decoder]
         hidden_r_h_vector = tf.tensordot(
-            target_hidden_state_0, self.U_rh, axes=1
+            s_t_1, self.U_rh, axes=1
         )  # [batch, dim_decoder]
         hidden_r_h_vector *= r1
-        pre_h_proposal = tf.tanh(hidden_r_h_vector + emb_y_h_vector) # eq 5 # [batch, dim_decoder]
+        s_hat_proposal = tf.tanh(
+            emby_h_vector + hidden_r_h_vector
+        )  # eq 5 # [batch, dim_decoder]
 
-        pre_h = z1 * target_hidden_state_0 + (1.0 - z1) * pre_h_proposal # eq 6 # [batch, dim_decoder]
+        s_hat = z1 * s_t_1 + (1.0 - z1) * s_hat_proposal
         # pre_h : s~ _t
 
         if y_mask is not None:
-            pre_h = (
-                y_mask[:, None] * pre_h
-                + (1.0 - y_mask)[:, None] * target_hidden_state_0
-            )
+            s_hat = y_mask[:, None] * s_hat + (1.0 - y_mask)[:, None] * s_t_1
         ##################### Get Context ##############################
         # pass through f_catt
-        contextA, alpha, alpha_past_one = self.attender.get_context(
-            annotation_one, pre_h, alpha_past_one, a_mask
-        )  # [batch, dim_ctx]
+        contextA, alpha_A, alpha_past_A = self.attender.get_contextA(
+            annotation_A, s_hat, alpha_past_A, A_mask
+        )  # [batch, dim_ctx] [bat, C]
 
-        contextB, alphaB, alpha_past_B = self.attender.get_contextB(
-            annotation_B, pre_h, alpha_past_B, B_mask
-        )
+        contextB, alpha_B, alpha_past_B = self.attender.get_contextB(
+            annotation_B, s_hat, alpha_past_B, B_mask
+        )  # [bat, C']
 
-        context = tf.concat([contextA, contextB], axis = 1) # [batch, 2 * dim_ctx]
-
-
+        context = tf.concat([contextA, contextB], axis=1)  # [batch, ctxA+ctxB]
 
         ##################### GRU2 ##############################
         # pre_h : s~ _t # [batch, dim_decoder]
-        # constext: c_t # [batch, 2 * dim_ctx]
+        # constext: c_t # [batch, ctxA + ctxB]
 
-        emb_y_z_r_nl_vector = (
-            tf.tensordot(pre_h, self.U_hz_hr_nl, axes=1) + self.b_hz_hr_nl
-        )
-        context_z_r_vector = tf.tensordot(context, self.W_c_z_r, axes=1)
-        z_r_vector = tf.sigmoid(emb_y_z_r_nl_vector + context_z_r_vector) # eq 3 4
+        shat_zr_vector = tf.tensordot(s_hat, self.U_hz_hr_nl, axes=1) + self.b_hz_hr_nl
+        context_zr_vector = tf.tensordot(
+            context, self.W_c_z_r, axes=1
+        )  # [bat, 2* hidden_dim]
+        z_r_vector = tf.sigmoid(shat_zr_vector + context_zr_vector)  # eq 3 4
         # [batch, 2 * hidden_dim]
 
-        r2 = z_r_vector[:, : self.hidden_dim] # [batch, hidden_dim]
-        z2 = z_r_vector[:, self.hidden_dim :] # [batch, hidden_dim]
+        r2 = z_r_vector[:, : self.hidden_dim]  # [batch, hidden_dim]
+        z2 = z_r_vector[:, self.hidden_dim :]  # [batch, hidden_dim]
 
-        emb_y_h_nl_vector = tf.tensordot(pre_h, self.U_rh_nl, axes=1) + self.b_rh_nl
+        emb_y_h_nl_vector = tf.tensordot(s_hat, self.U_rh_nl, axes=1) + self.b_rh_nl
         emb_y_h_nl_vector *= r2
-        context_h_vector = tf.tensordot(context, self.W_c_h_nl, axes=1)
-        h_proposal = tf.tanh(emb_y_h_nl_vector + context_h_vector) # eq 5
-        h = z2 * pre_h + (1.0 - z2) * h_proposal # eq 6
+        context_h_vector = tf.tensordot(
+            context, self.W_c_h_nl, axes=1
+        )  # [bat, hidden_dim]
+        h_proposal = tf.tanh(emb_y_h_nl_vector + context_h_vector)  # eq 5
+        h = z2 * s_hat + (1.0 - z2) * h_proposal  # eq 6
 
         if y_mask is not None:
-            h = y_mask[:, None] * h + (1.0 - y_mask)[:, None] * pre_h
+            h = y_mask[:, None] * h + (1.0 - y_mask)[:, None] * s_hat
 
-        return h, context, alpha, alpha_past_one, annotation_one, a_mask, alphaB, alpha_past_B, annotation_B, B_mask
+        return (
+            h,
+            context,
+            alpha_A,
+            alpha_past_A,
+            annotation_A,
+            A_mask,
+            alpha_B,
+            alpha_past_B,
+            annotation_B,
+            B_mask,
+        )
         #     st,   ct   in formula 10
+
 
 class WAP:
     def __init__(
@@ -760,15 +769,22 @@ class WAP:
         self.attender = attender
         self.parser = parser
         self.Wa2h = tf.Variable(
-            norm_weight(self.contextA_dim+self.contextB_dim, self.hidden_dim), name="Wa2h"
+            norm_weight(self.contextA_dim + self.contextB_dim, self.hidden_dim),
+            name="Wa2h",
         )
         self.ba2h = tf.Variable(
             np.zeros((self.hidden_dim,)).astype("float32"), name="ba2h"
         )
-        self.Wc = tf.Variable(norm_weight(self.contextA_dim + self.contextB_dim, self.word_dim), name="Wc")
+        self.Wc = tf.Variable(
+            norm_weight(self.contextA_dim + self.contextB_dim, self.word_dim), name="Wc"
+        )
         self.bc = tf.Variable(np.zeros((self.word_dim,)).astype("float32"), name="bc")
-        self.Wh = tf.Variable(norm_weight(self.hidden_dim, self.word_dim), name="Wh") #Ws
-        self.bh = tf.Variable(np.zeros((self.word_dim,)).astype("float32"), name="bh") #bs
+        self.Wh = tf.Variable(
+            norm_weight(self.hidden_dim, self.word_dim), name="Wh"
+        )  # Ws
+        self.bh = tf.Variable(
+            np.zeros((self.word_dim,)).astype("float32"), name="bh"
+        )  # bs
         self.Wy = tf.Variable(norm_weight(self.word_dim, self.word_dim), name="Wy")
         self.by = tf.Variable(np.zeros((self.word_dim,)).astype("float32"), name="by")
         self.Wo = tf.Variable(
@@ -777,7 +793,7 @@ class WAP:
         self.bo = tf.Variable(np.zeros((self.target_dim,)).astype("float32"), name="bo")
         self.training = training
 
-    def get_cost(self, A_annotation, cost_y, a_m, y_m, B_out, B_mask):
+    def get_cost(self, A_annotation, cost_y, A_mask, y_m, B_annotation, B_mask):
         timesteps = tf.shape(cost_y)[0]
         batch_size = tf.shape(cost_y)[1]
         emb_y = tf.nn.embedding_lookup(self.embed_matrix, tf.reshape(cost_y, [-1]))
@@ -795,40 +811,43 @@ class WAP:
         new_emb_y = emb_shift
         # print(a_m.shape)
         # print(B_mask.shape)
-        anno_mean = (
-            tf.concat(
-                [   tf.reduce_sum(A_annotation * a_m[:, :, :, None], axis=[1, 2]),
-                    tf.reduce_sum(B_out * B_mask[:, :, :, None], axis=[1, 2])],
-                axis=1
-            )
-            / tf.reduce_sum(a_m, axis=[1, 2])[:, None]
+        anno_mean = tf.concat(
+            [
+                tf.reduce_sum(A_annotation * A_mask[:, :, :, None], axis=[1, 2])
+                / tf.reduce_sum(A_mask, axis=[1, 2])[:, None],
+                tf.reduce_sum(B_annotation * B_mask[:, :, :, None], axis=[1, 2])
+                / tf.reduce_sum(B_mask, axis=[1, 2])[:, None],
+            ],
+            axis=1,
         )
+
         h_0 = (
             tf.tensordot(anno_mean, self.Wa2h, axes=1) + self.ba2h
         )  # [batch, hidden_dim]
         h_0 = tf.tanh(h_0)
 
-        ret = self.parser.get_ht_ctx(new_emb_y, h_0, A_annotation, a_m, y_m, B_out, B_mask)
+        ret = self.parser.get_ht_ctx(
+            new_emb_y, h_0, A_annotation, A_mask, y_m, B_annotation, B_mask
+        )
         ##### Eq 10 #####
         h_t = ret[0]  # h_t of all timesteps [timesteps, batch, word_dim]
-        c_t = ret[1]  # c_t of all timesteps [timesteps, batch, context_dim]
-        # c_t [ timesteps, batch, contextA + contextB_dim ]
+        c_t = ret[1]  # c_t of all timesteps [timesteps, batch, contextA+contextB]
 
         y_t_1 = new_emb_y  # shifted y | [1:] = [:-1]
-        logit_gru = tf.tensordot(h_t, self.Wh, axes=1) + self.bh # formula 10
-        logit_ctx = tf.tensordot(c_t, self.Wc, axes=1) + self.bc # formula 10
-        logit_pre = tf.tensordot(y_t_1, self.Wy, axes=1) + self.by # formula 10
-        logit = logit_pre + logit_ctx + logit_gru # formula 10
+        logit_gru = tf.tensordot(h_t, self.Wh, axes=1) + self.bh  # formula 10
+        logit_ctx = tf.tensordot(c_t, self.Wc, axes=1) + self.bc  # formula 10
+        logit_pre = tf.tensordot(y_t_1, self.Wy, axes=1) + self.by  # formula 10
+        logit = logit_pre + logit_ctx + logit_gru  # formula 10
         shape = tf.shape(logit)
         logit = tf.reshape(logit, [shape[0], -1, shape[2] // 2, 2])
         logit = tf.reduce_max(logit, axis=3)
 
         logit = tf.layers.dropout(inputs=logit, rate=0.2, training=self.training)
 
-        logit = tf.tensordot(logit, self.Wo, axes=1) + self.bo # formula 10
+        logit = tf.tensordot(logit, self.Wo, axes=1) + self.bo  # formula 10
         logit_shape = tf.shape(logit)
         logit = tf.reshape(logit, [-1, logit_shape[2]])
-        cost = tf.nn.softmax_cross_entropy_with_logits_v2( # formula 10
+        cost = tf.nn.softmax_cross_entropy_with_logits_v2(  # formula 10
             logits=logit,
             labels=tf.one_hot(tf.reshape(cost_y, [-1]), depth=self.target_dim),
         )
@@ -839,8 +858,15 @@ class WAP:
         cost = tf.reduce_mean(cost)
         return cost
 
-    def get_word(self, sample_y, sample_h_pre, alphaA_past_pre, sample_annotationA,
-    alphaB_past_pre, sample_annotationB):
+    def get_word(
+        self,
+        sample_y,
+        sample_h_pre,
+        alphaA_past_pre,
+        sample_annotationA,
+        alphaB_past_pre,
+        sample_annotationB,
+    ):
 
         emb = tf.cond(
             sample_y[0] < 0,
@@ -873,7 +899,6 @@ class WAP:
 
         pre_h = z1 * sample_h_pre + (1.0 - z1) * pre_h_proposal
 
-
         # tf.print(sample_annotationA, alphaA_past_pre)
         contextA, _, alphaA_past = self.parser.attender.get_context(
             sample_annotationA, pre_h, alphaA_past_pre, None
@@ -881,7 +906,7 @@ class WAP:
         contextB, _, alphaB_past = self.parser.attender.get_contextB(
             sample_annotationB, pre_h, alphaB_past_pre, None
         )  # [batch, dim_ctx]
-        context = tf.concat([contextA, contextB], axis = 1)
+        context = tf.concat([contextA, contextB], axis=1)
         emb_y_z_r_nl_vector = (
             tf.tensordot(pre_h, self.parser.U_hz_hr_nl, axes=1) + self.parser.b_hz_hr_nl
         )
@@ -922,11 +947,24 @@ class WAP:
         return next_probs, next_word, h_t, alphaA_past_t, alphaB_past_t
 
     def get_sample(
-        self, p, w, h, alphaA, ctxA0, alphaB, ctxB0, h_0, k, maxlen, stochastic, session, training
+        self,
+        p,
+        w,
+        h,
+        alphaA,
+        ctxA0,
+        alphaB,
+        ctxB0,
+        h_0,
+        k,
+        maxlen,
+        stochastic,
+        session,
+        training,
     ):
 
         global annoA, infer_y, h_pre, alphaA_past, if_trainning, dictLen, annoB, alphaB_past
-        
+
         sample = []
         sample_score = []
 
@@ -966,7 +1004,7 @@ class WAP:
                 if_trainning: training,
             }
 
-            next_p, next_w, next_state, next_alphaA_past,next_alphaB_past = session.run(
+            next_p, next_w, next_state, next_alphaA_past, next_alphaB_past = session.run(
                 [p, w, h, alphaA, alphaB], feed_dict=input_dict
             )
 
@@ -1049,7 +1087,6 @@ def main(args):
     # global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
     global annoA, infer_y, h_pre, alphaA_past, if_trainning, dictLen, annoB, alphaB_past
 
-
     worddicts = load_dict(args.dictPath)
     dictLen = len(worddicts)
     worddicts_r = [None] * len(worddicts)
@@ -1079,29 +1116,31 @@ def main(args):
     print("train lenth is ", len(train))
     print("valid lenth is ", len(valid))
 
+    # [bat, h, w, 1]
     x = tf.placeholder(tf.float32, shape=[None, None, None, 1])
 
+    # [bat, label]
     y = tf.placeholder(tf.int32, shape=[None, None])
 
+    # [bat, h, w]
     x_mask = tf.placeholder(tf.float32, shape=[None, None, None])
 
+    # [bat, label]
     y_mask = tf.placeholder(tf.float32, shape=[None, None])
 
     lr = tf.placeholder(tf.float32, shape=())
 
     if_trainning = tf.placeholder(tf.bool, shape=())
 
-    B_option = {
-        "branch_from": 1,
-        "growth_rate": 24,
-        "level": 8 # D/2
-    }
+    B_option = {"branch_from": 1, "growth_rate": 24, "level": 8}  # D/2
 
     watcher_train = Watcher_train(
         blocks=3, level=16, growth_rate=24, training=if_trainning, B_option=B_option
     )
 
-    A_annotation, A_anno_mask, B_annotation, B_mask = watcher_train.dense_net(x, x_mask)
+    # annotation [bat, H, W, C]
+    # mask [bat, H, W]
+    A_annotation, A_mask, B_annotation, B_mask = watcher_train.dense_net(x, x_mask)
 
     # for initilaizing validation
     annoA = tf.placeholder(
@@ -1113,13 +1152,6 @@ def main(args):
             A_annotation.shape.as_list()[3],
         ],
     )
-    infer_y = tf.placeholder(tf.int64, shape=(None,))
-    h_pre = tf.placeholder(tf.float32, shape=[None, 256])
-    alphaA_past = tf.placeholder(
-        tf.float32,
-        shape=[None, A_annotation.shape.as_list()[1], A_annotation.shape.as_list()[2]],
-    )
-
     annoB = tf.placeholder(
         tf.float32,
         shape=[
@@ -1129,17 +1161,32 @@ def main(args):
             B_annotation.shape.as_list()[3],
         ],
     )
+    infer_y = tf.placeholder(tf.int64, shape=(None,))
+    h_pre = tf.placeholder(tf.float32, shape=[None, 256])
+
+    alphaA_past = tf.placeholder(
+        tf.float32,
+        shape=[None, A_annotation.shape.as_list()[1], A_annotation.shape.as_list()[2]],
+    )
     alphaB_past = tf.placeholder(
         tf.float32,
         shape=[None, B_annotation.shape.as_list()[1], B_annotation.shape.as_list()[2]],
     )
 
     attender = Attender(
-        (A_annotation.shape.as_list()[3], B_annotation.shape.as_list()[3]), 
-        256, 
-        512)
+        A_annotation.shape.as_list()[3],
+        B_annotation.shape.as_list()[3],
+        dim_decoder=256,
+        dim_attend=512,
+    )
 
-    parser = Parser(256, 256, attender, A_annotation.shape.as_list()[3], B_annotation.shape.as_list()[3])
+    parser = Parser(
+        hidden_dim=256,
+        word_dim=256,
+        attender=attender,
+        contextA_dim=A_annotation.shape.as_list()[3],
+        contextB_dim=B_annotation.shape.as_list()[3],
+    )
 
     wap = WAP(
         watcher_train,
@@ -1152,17 +1199,23 @@ def main(args):
         dictLen,
         if_trainning,
     )
-    
-    
+
     hidden_state_0 = tf.tanh(
         tf.tensordot(
-            tf.concat([tf.reduce_mean(annoA, axis=[1, 2]), tf.reduce_mean(annoB, axis=[1, 2])], axis=1),
+            tf.concat(
+                [
+                    tf.reduce_mean(annoA, axis=[1, 2]),
+                    tf.reduce_mean(annoB, axis=[1, 2]),
+                ],
+                axis=1,
+            ),
             wap.Wa2h,
-            axes=1
-        ) + wap.ba2h
+            axes=1,
+        )
+        + wap.ba2h
     )  # [batch, hidden_dim]
 
-    cost = wap.get_cost(A_annotation, y, A_anno_mask, y_mask, B_annotation, B_mask)
+    cost = wap.get_cost(A_annotation, y, A_mask, y_mask, B_annotation, B_mask)
 
     vs = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
 
@@ -1170,7 +1223,9 @@ def main(args):
         if not vv.name.startswith("batch_normalization"):
             cost += 1e-4 * tf.reduce_sum(tf.pow(vv, 2))
 
-    p, w, h, alphaA, alphaB = wap.get_word(infer_y, h_pre, alphaA_past, annoA, alphaB_past, annoB)
+    p, w, h, alphaA, alphaB = wap.get_word(
+        infer_y, h_pre, alphaA_past, annoA, alphaB_past, annoB
+    )
 
     optimizer = tf.train.AdadeltaOptimizer(learning_rate=lr)
 
@@ -1191,9 +1246,17 @@ def main(args):
     uidx = 0
     cost_s = 0
     dispFreq = 100 if args.dispFreq is None else args.dispFreq
-    saveFreq = len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
-    sampleFreq = len(train) * args.epochSampleRatio if args.sampleFreq is None else args.sampleFreq
-    validFreq = len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
+    saveFreq = (
+        len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
+    )
+    sampleFreq = (
+        len(train) * args.epochSampleRatio
+        if args.sampleFreq is None
+        else args.sampleFreq
+    )
+    validFreq = (
+        len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
+    )
     history_errs = []
     estop = False
     halfLrFlag = 0
@@ -1206,7 +1269,7 @@ def main(args):
     log.write(str(patience))
     log.write(str(lr))
     with tf.Session(config=config) as sess:
-        writer = tf.summary.FileWriter('logs', sess.graph)
+        writer = tf.summary.FileWriter("logs", sess.graph)
         sess.run(init)
         for epoch in range(max_epoch):
             n_samples = 0
@@ -1253,9 +1316,11 @@ def main(args):
                     cost_s = 0
 
                 if np.mod(uidx, sampleFreq) == 0:
-                    print('Start sampling...')
+                    print("Start sampling...")
                     _t = time.time()
-                    fpp_sample = open(os.path.join(args.resultPath, f"{args.resultFileName}.txt"), "w")
+                    fpp_sample = open(
+                        os.path.join(args.resultPath, f"{args.resultFileName}.txt"), "w"
+                    )
                     valid_count_idx = 0
                     for batch_x, batch_y in valid:
                         for xx in batch_x:
@@ -1266,9 +1331,12 @@ def main(args):
                             xx_pad[:, :, :] = xx / 255.0
                             xx_pad = xx_pad[None, :, :, :]
                             annotA, annotB = sess.run(
-                                [A_annotation, B_annotation], feed_dict={x: xx_pad, if_trainning: False}
+                                [A_annotation, B_annotation],
+                                feed_dict={x: xx_pad, if_trainning: False},
                             )
-                            h_state = sess.run(hidden_state_0, feed_dict={annoA: annotA, annoB: annotB})
+                            h_state = sess.run(
+                                hidden_state_0, feed_dict={annoA: annotA, annoB: annotB}
+                            )
 
                             sample, score = wap.get_sample(
                                 p,
@@ -1305,7 +1373,7 @@ def main(args):
                     print(f"Done sampling, took {time.time() - _t}.")
 
                 if np.mod(uidx, validFreq) == 0:
-                    print('Start validating...')
+                    print("Start validating...")
                     _t = time.time()
                     probs = []
                     for batch_x, batch_y in valid:
@@ -1333,7 +1401,9 @@ def main(args):
                         + " "
                         + os.path.join(args.resultPath, f"{args.resultFileName}.wer")
                     )
-                    fpp = open(os.path.join(args.resultPath, f"{args.resultFileName}.wer"))
+                    fpp = open(
+                        os.path.join(args.resultPath, f"{args.resultFileName}.wer")
+                    )
                     stuff = fpp.readlines()
                     fpp.close()
                     m = re.search("WER (.*)\n", stuff[0])
@@ -1385,6 +1455,7 @@ def main(args):
                 break
         writer.close()
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dictPath", type=str)
@@ -1400,12 +1471,12 @@ if __name__ == "__main__":
     parser.add_argument("--sampleFreq", type=int)
     parser.add_argument("--validFreq", type=int)
     parser.add_argument("--patience", type=int)
-    parser.add_argument("--epochDispRatio", type=int, default = 1)
-    parser.add_argument("--epochSampleRatio", type=int, default = 1)
-    parser.add_argument("--epochValidRatio", type=int, default = 1)
-    parser.add_argument("--lr", type=float, default = 1)
-    parser.add_argument("--resultFileName", type=str, default = "valid")
+    parser.add_argument("--epochDispRatio", type=int, default=1)
+    parser.add_argument("--epochSampleRatio", type=int, default=1)
+    parser.add_argument("--epochValidRatio", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=1)
+    parser.add_argument("--resultFileName", type=str, default="valid")
     (args, unknown) = parser.parse_known_args()
-    print(f'Run with args {args}')
+    print(f"Run with args {args}")
     main(args)
 
