@@ -3,6 +3,7 @@ from tensorflow.contrib.layers import batch_norm
 from tensorflow.contrib.framework import arg_scope
 import numpy as np
 from data import dataIterator, load_dict, prepare_data
+from compute_wer import process as wer_process
 import random
 import sys
 import copy
@@ -674,7 +675,7 @@ class WAP:
     ):
 
         global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
-        
+
         sample = []
         sample_score = []
 
@@ -781,7 +782,6 @@ class WAP:
 
 def main(args):
     global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
-
 
     worddicts = load_dict(args.dictPath)
     dictLen = len(worddicts)
@@ -894,9 +894,17 @@ def main(args):
     uidx = 0
     cost_s = 0
     dispFreq = 100 if args.dispFreq is None else args.dispFreq
-    saveFreq = len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
-    sampleFreq = len(train) * args.epochSampleRatio if args.sampleFreq is None else args.sampleFreq
-    validFreq = len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
+    saveFreq = (
+        len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
+    )
+    sampleFreq = (
+        len(train) * args.epochSampleRatio
+        if args.sampleFreq is None
+        else args.sampleFreq
+    )
+    validFreq = (
+        len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
+    )
     history_errs = []
     estop = False
     halfLrFlag = 0
@@ -904,7 +912,6 @@ def main(args):
     lrate = args.lr
     logPath = "./log.txt" if args.logPath is None else args.logPath
     log = open(logPath, "w")
-
 
     log.write(str(vars(args)))
     log.write(str(patience))
@@ -957,9 +964,14 @@ def main(args):
                     cost_s = 0
 
                 if np.mod(uidx, sampleFreq) == 0:
-                    print('Start sampling...')
+                    print("Start sampling...")
                     _t = time.time()
-                    fpp_sample = open(os.path.join(args.resultPath, f"{args.resultFileName}.txt"), "w")
+                    fpp_sample = open(
+                        os.path.join(
+                            args.resultPath, str(args.resultFileName) + ".txt"
+                        ),
+                        "w",
+                    )
                     valid_count_idx = 0
                     for batch_x, batch_y in valid:
                         for xx in batch_x:
@@ -1003,10 +1015,10 @@ def main(args):
                     print("valid set decode done")
                     log.write("valid set decode done\n")
                     log.flush()
-                    print(f"Done sampling, took {time.time() - _t}.")
+                    print("Done sampling, took" + str(time.time() - _t))
 
                 if np.mod(uidx, validFreq) == 0:
-                    print('Start validating...')
+                    print("Start validating...")
                     _t = time.time()
                     probs = []
                     for batch_x, batch_y in valid:
@@ -1026,15 +1038,14 @@ def main(args):
                         probs.append(pprobs)
                     valid_errs = np.array(probs)
                     valid_err_cost = valid_errs.mean()
-                    os.system(
-                        "python3 compute-wer.py "
-                        + os.path.join(args.resultPath, f"{args.resultFileName}.txt")
-                        + " "
-                        + args.validCaptionPath
-                        + " "
-                        + os.path.join(args.resultPath, f"{args.resultFileName}.wer")
+                    wer_process(
+                        os.path.join(args.resultPath, args.resultFileName + ".txt"),
+                        args.validCaptionPath,
+                        os.path.join(args.resultPath, args.resultFileName + ".wer"),
                     )
-                    fpp = open(os.path.join(args.resultPath, f"{args.resultFileName}.wer"))
+                    fpp = open(
+                        os.path.join(args.resultPath, args.resultFileName + ".wer")
+                    )
                     stuff = fpp.readlines()
                     fpp.close()
                     m = re.search("WER (.*)\n", stuff[0])
@@ -1070,7 +1081,7 @@ def main(args):
                                 bad_counter = 0
                                 lrate = lrate / 10
                                 halfLrFlag += 1
-                    print(f"bad_counter {bad_counter}")
+                    print("bad_counter" + str(bad_counter))
                     print(
                         "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
                         % (valid_per, valid_sacc, valid_err_cost)
@@ -1081,7 +1092,7 @@ def main(args):
                         + "\n"
                     )
                     log.flush()
-                    print(f"Done validating, took {time.time() - _t}.")
+                    print("Done validating, took" + str(time.time() - _t))
             if estop:
                 break
 
@@ -1101,12 +1112,12 @@ if __name__ == "__main__":
     parser.add_argument("--sampleFreq", type=int)
     parser.add_argument("--validFreq", type=int)
     parser.add_argument("--patience", type=int)
-    parser.add_argument("--epochDispRatio", type=int, default = 1)
-    parser.add_argument("--epochSampleRatio", type=int, default = 1)
-    parser.add_argument("--epochValidRatio", type=int, default = 1)
-    parser.add_argument("--lr", type=float, default = 1)
-    parser.add_argument("--resultFileName", type=str, default = "valid")
+    parser.add_argument("--epochDispRatio", type=int, default=1)
+    parser.add_argument("--epochSampleRatio", type=int, default=1)
+    parser.add_argument("--epochValidRatio", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=1)
+    parser.add_argument("--resultFileName", type=str, default="valid")
     (args, unknown) = parser.parse_known_args()
-    print(f'Run with args {args}')
+    print("Run with args " + str(vars(args)))
     main(args)
 

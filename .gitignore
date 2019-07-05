@@ -7,3 +7,4 @@ quick-test-set
 *.pkl
 *.txt
 data/*
+.vscode

@@ -46,10 +46,9 @@ def process(recfile, labelfile, resultfile):
     wer = float(total_dist)/total_label
     sacc = float(total_line_rec)/total_line
 
-    f_result = open(resultfile,'w')
-    f_result.write('WER {}\n'.format(wer))
-    f_result.write('ExpRate {}\n'.format(sacc))
-    f_result.close()
+    with open(resultfile,'w') as f_result:
+        f_result.write('WER {}\n'.format(wer))
+        f_result.write('ExpRate {}\n'.format(sacc))
 
 if __name__ == '__main__':
     if len(sys.argv) != 4:

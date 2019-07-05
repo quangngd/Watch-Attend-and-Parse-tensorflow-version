@@ -3,6 +3,7 @@ from tensorflow.contrib.layers import batch_norm
 from tensorflow.contrib.framework import arg_scope
 import numpy as np
 from data import dataIterator, load_dict, prepare_data
+from compute_wer import process as wer_process
 import random
 import sys
 import copy
@@ -900,13 +901,13 @@ class WAP:
         pre_h = z1 * sample_h_pre + (1.0 - z1) * pre_h_proposal
 
         # tf.print(sample_annotationA, alphaA_past_pre)
-        contextA, _, alphaA_past = self.parser.attender.get_context(
+        contextA, _, alphaA_past = self.parser.attender.get_contextA(
             sample_annotationA, pre_h, alphaA_past_pre, None
         )  # [batch, dim_ctx]
         contextB, _, alphaB_past = self.parser.attender.get_contextB(
             sample_annotationB, pre_h, alphaB_past_pre, None
         )  # [batch, dim_ctx]
-        context = tf.concat([contextA, contextB], axis=1)
+        context = tf.concat([contextA, contextB], axis=1)  # [bat, ctxA+ctxB]
         emb_y_z_r_nl_vector = (
             tf.tensordot(pre_h, self.parser.U_hz_hr_nl, axes=1) + self.parser.b_hz_hr_nl
         )
@@ -1348,7 +1349,7 @@ def main(args):
                                 annotB,
                                 h_state,
                                 10,
-                                100,
+                                200,
                                 False,
                                 sess,
                                 training=False,
@@ -1393,13 +1394,11 @@ def main(args):
                         probs.append(pprobs)
                     valid_errs = np.array(probs)
                     valid_err_cost = valid_errs.mean()
-                    os.system(
-                        "python3 compute-wer.py "
-                        + os.path.join(args.resultPath, f"{args.resultFileName}.txt")
-                        + " "
-                        + args.validCaptionPath
-                        + " "
-                        + os.path.join(args.resultPath, f"{args.resultFileName}.wer")
+
+                    wer_process(
+                        os.path.join(args.resultPath, f"{args.resultFileName}.txt"),
+                        args.validCaptionPath,
+                        os.path.join(args.resultPath, f"{args.resultFileName}.wer"),
                     )
                     fpp = open(
                         os.path.join(args.resultPath, f"{args.resultFileName}.wer")
