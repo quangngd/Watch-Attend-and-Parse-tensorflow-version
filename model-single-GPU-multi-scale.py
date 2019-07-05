@@ -1456,7 +1456,7 @@ def main(args):
                 break
         writer.close()
 
-        save_path = saver.save(sess, os.path.join(args.savePath + args.saveName))
+        save_path = saver.save(sess, os.path.join(args.savePath + args.saveName) + ".ckpt")
 
 
 if __name__ == "__main__":
