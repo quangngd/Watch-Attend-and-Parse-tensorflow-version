@@ -8,3 +8,4 @@ quick-test-set
 *.txt
 data/*
 .vscode
+*.sh

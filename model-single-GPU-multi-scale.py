@@ -243,9 +243,9 @@ class Watcher_train:
                 )
 
             if i == self.B_branch_from:
-                B_name = x.name
+                B_out = x
                 B_mask = tf.identity(mask_x)
-
+            
             if i < self.blocks - 1:
                 x = tf.layers.average_pooling2d(
                     inputs=x, pool_size=[2, 2], strides=2, padding="SAME"
@@ -255,8 +255,7 @@ class Watcher_train:
 
             # print(f'x {x.shape.as_list()}')
             # print(f'dense {dense_out.shape.as_list()}')
-
-        B_out = tf.get_default_graph().get_tensor_by_name(B_name)
+        
         B = B_out
         for j in range(self.B_level):
             #### [1, 1] convolution part for bottleneck ####
@@ -1277,6 +1276,8 @@ def main(args):
             random.shuffle(train)
             for batch_x, batch_y in train:
                 batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(batch_x, batch_y)
+                print(batch_x.shape, batch_x_m.shape, batch_y.shape, batch_y_m.shape)
+                sys.exit(1)
                 n_samples += len(batch_x)
                 uidx += 1
 
@@ -1425,7 +1426,7 @@ def main(args):
                     ):
                         bad_counter += 1
                         if bad_counter > patience:
-                            if halfLrFlag == 3:
+                            if halfLrFlag == 2:
                                 print("Early Stop!")
                                 log.write("Early Stop!\n")
                                 log.flush()
