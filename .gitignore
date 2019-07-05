@@ -9,3 +9,4 @@ quick-test-set
 data/*
 .vscode
 *.sh
+trained
