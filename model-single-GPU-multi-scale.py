@@ -1479,7 +1479,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochValidRatio", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1)
     parser.add_argument("--resultFileName", type=str, default="valid")
-    parser.add_argument("--savePath", type=str, default="./trained")
+    parser.add_argument("--savePath", type=str, default="./trained/")
     parser.add_argument("--saveName", type=str)
     (args, unknown) = parser.parse_known_args()
     print(f"Run with args {args}")

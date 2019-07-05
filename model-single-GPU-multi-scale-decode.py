@@ -1097,7 +1097,7 @@ def main(args):
         args.testPklPath,
         args.testCaptionPath,
         worddicts,
-        batch_size=args.batch_size,
+        batch_size=2,
         batch_Imagesize=400000,
         maxlen=100,
         maxImagesize=400000,
@@ -1235,14 +1235,14 @@ def main(args):
     with tf.Session(config=config) as sess:
         writer = tf.summary.FileWriter("logs", sess.graph)
         sess.run(init)
-        saver.restore(sess, "/tmp/model.ckpt")
+        saver.restore(sess, os.path.join(args.modelPath, args.modelFileName) + ".ckpt")
 
         print("Start sampling...")
         _t = time.time()
         fpp_sample = open(
             os.path.join(args.resultPath, f"{args.resultFileName}.txt"), "w"
         )
-        valid_count_idx = 0
+        test_count_idx = 0
         for batch_x, batch_y in test:
             for xx in batch_x:
                 xx = np.moveaxis(xx, 0, -1)
@@ -1276,12 +1276,10 @@ def main(args):
                 )
                 score = score / np.array([len(s) for s in sample])
                 ss = sample[score.argmin()]
-                fpp_sample.write(valid_uid_list[valid_count_idx])
-                valid_count_idx = valid_count_idx + 1
-                if np.mod(valid_count_idx, 100) == 0:
-                    print("gen %d samples" % valid_count_idx)
-                    log.write("gen %d samples" % valid_count_idx + "\n")
-                    log.flush()
+                fpp_sample.write(test_uid_list[test_count_idx])
+                test_count_idx = test_count_idx + 1
+                if np.mod(test_count_idx, 100) == 0:
+                    print("gen %d samples" % test_count_idx)
                 for vv in ss:
                     if vv == 0:  # <eol>
                         break
@@ -1289,8 +1287,6 @@ def main(args):
                 fpp_sample.write("\n")
         fpp_sample.close()
         print("valid set decode done")
-        log.write("valid set decode done\n")
-        log.flush()
         print(f"Done sampling, took {time.time() - _t}.")
 
         print("Start validating...")
@@ -1309,26 +1305,26 @@ def main(args):
                 },
             )
             probs.append(pprobs)
-        valid_errs = np.array(probs)
-        valid_err_cost = valid_errs.mean()
+        test_errs = np.array(probs)
+        test_err_cost = test_errs.mean()
 
         wer_process(
             os.path.join(args.resultPath, f"{args.resultFileName}.txt"),
-            args.validCaptionPath,
+            args.testCaptionPath,
             os.path.join(args.resultPath, f"{args.resultFileName}.wer"),
         )
         fpp = open(os.path.join(args.resultPath, f"{args.resultFileName}.wer"))
         stuff = fpp.readlines()
         fpp.close()
         m = re.search("WER (.*)\n", stuff[0])
-        valid_per = 100.0 * float(m.group(1))
+        test_per = 100.0 * float(m.group(1))
         m = re.search("ExpRate (.*)\n", stuff[1])
-        valid_sacc = 100.0 * float(m.group(1))
-        valid_err = valid_per
+        test_sacc = 100.0 * float(m.group(1))
+        test_err = test_per
 
         print(
-            "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
-            % (valid_per, valid_sacc, valid_err_cost)
+            "Test WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
+            % (test_per, test_sacc, test_err_cost)
         )
         print(f"Done validating, took {time.time() - _t}.")
 
@@ -1339,6 +1335,8 @@ if __name__ == "__main__":
     parser.add_argument("testPklPath", type=str)
     parser.add_argument("testCaptionPath", type=str)
     parser.add_argument("resultPath", type=str)
+    parser.add_argument("modelFileName", type=str)
+    parser.add_argument("--modelPath", type=str, default="./trained/")
     parser.add_argument("--resultFileName", type=str, default="test")
     (args, unknown) = parser.parse_known_args()
     print(f"Run with args {args}")
