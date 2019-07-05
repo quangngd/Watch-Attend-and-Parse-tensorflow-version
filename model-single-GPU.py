@@ -916,6 +916,9 @@ def main(args):
     log.write(str(vars(args)))
     log.write(str(patience))
     log.write(str(lr))
+
+    saver = tf.train.Saver()
+
     with tf.Session(config=config) as sess:
         sess.run(init)
         for epoch in range(max_epoch):
@@ -1096,6 +1099,8 @@ def main(args):
             if estop:
                 break
 
+        save_path = saver.save(sess, os.path.join(args.savePath + args.saveName))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -1117,6 +1122,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochValidRatio", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1)
     parser.add_argument("--resultFileName", type=str, default="valid")
+    parser.add_argument("--savePath", type=str, default="./trained")
+    parser.add_argument("--saveName", type=str)
     (args, unknown) = parser.parse_known_args()
     print("Run with args " + str(vars(args)))
     main(args)
