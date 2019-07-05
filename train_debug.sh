@@ -13,7 +13,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 
 # tensorboard --logdir=./logs &&\
-python3 model-single-GPU.py ./quick-test-set/dictionary.txt \
+python3 model-single-GPU-multi-scale.py ./quick-test-set/dictionary.txt \
                                         ./quick-test-set/train.pkl \
                                         ./quick-test-set/train.txt \
                                         ./quick-test-set/test.pkl \
