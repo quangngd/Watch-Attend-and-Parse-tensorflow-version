@@ -1276,8 +1276,6 @@ def main(args):
             random.shuffle(train)
             for batch_x, batch_y in train:
                 batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(batch_x, batch_y)
-                print(batch_x.shape, batch_x_m.shape, batch_y.shape, batch_y_m.shape)
-                sys.exit(1)
                 n_samples += len(batch_x)
                 uidx += 1
 
