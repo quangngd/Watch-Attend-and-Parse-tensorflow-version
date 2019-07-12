@@ -1132,7 +1132,7 @@ def main(args):
 
     if_trainning = tf.placeholder(tf.bool, shape=())
 
-    B_option = {"branch_from": 1, "growth_rate": 24, "level": 8}  # D/2
+    B_option = {"branch_from": 0, "growth_rate": 24, "level": 8}  # D/2
 
     watcher_train = Watcher_train(
         blocks=3, level=16, growth_rate=24, training=if_trainning, B_option=B_option

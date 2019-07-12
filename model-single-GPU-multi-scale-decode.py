@@ -1093,7 +1093,7 @@ def main(args):
     for kk, vv in worddicts.items():
         worddicts_r[vv] = kk
 
-    test, test_uid_list = dataIterator(
+    test, test_uid_list, samples = dataIterator(
         args.testPklPath,
         args.testCaptionPath,
         worddicts,
@@ -1103,6 +1103,7 @@ def main(args):
         maxImagesize=400000,
     )
 
+    print('test samples is ', samples)
     print("test lenth is ", len(test))
 
     # [bat, h, w, 1]
