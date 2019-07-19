@@ -1132,7 +1132,7 @@ def main(args):
 
     if_trainning = tf.placeholder(tf.bool, shape=())
 
-    B_option = {"branch_from": 1, "growth_rate": 24, "level": 8}  # D/2
+    B_option = {"branch_from": 0, "growth_rate": 24, "level": 12}  # D/2
 
     watcher_train = Watcher_train(
         blocks=3, level=16, growth_rate=24, training=if_trainning, B_option=B_option
@@ -1277,7 +1277,6 @@ def main(args):
     with tf.Session(config=config) as sess:
         writer = tf.summary.FileWriter("logs", sess.graph)
         sess.run(init)
-        print('inited')
         for epoch in range(max_epoch):
             n_samples = 0
             random.shuffle(train)

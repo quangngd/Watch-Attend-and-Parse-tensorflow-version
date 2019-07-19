@@ -1103,8 +1103,6 @@ def main(args):
         maxImagesize=400000,
     )
 
-    print("test lenth is ", len(test))
-
     # [bat, h, w, 1]
     x = tf.placeholder(tf.float32, shape=[None, None, None, 1])
 
