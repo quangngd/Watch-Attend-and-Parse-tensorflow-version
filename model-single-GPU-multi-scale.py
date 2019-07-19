@@ -1274,6 +1274,7 @@ def main(args):
     with tf.Session(config=config) as sess:
         writer = tf.summary.FileWriter("logs", sess.graph)
         sess.run(init)
+        print('inited')
         for epoch in range(max_epoch):
             n_samples = 0
             random.shuffle(train)
