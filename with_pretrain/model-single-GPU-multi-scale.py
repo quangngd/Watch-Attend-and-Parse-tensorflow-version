@@ -1087,50 +1087,20 @@ def main(args):
     # global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
     global annoA, infer_y, h_pre, alphaA_past, if_trainning, dictLen, annoB, alphaB_past
 
+
+    # Logging setup
+    log=logging.getLogger()
+    fileHandler = logging.FileHandler(logPath)
+    log.addHandler(fileHandler)
+    consoleHandler = logging.StreamHandler()
+    log.addHandler(consoleHandler)
+
+
     worddicts = load_dict(args.dictPath)
     dictLen = len(worddicts)
     worddicts_r = [None] * len(worddicts)
     for kk, vv in worddicts.items():
         worddicts_r[vv] = kk
-
-    train, train_uid_list = dataIterator(
-        args.trainPklPath,
-        args.trainCaptionPath,
-        worddicts,
-        batch_size=args.batch_size,
-        batch_Imagesize=500000,
-        maxlen=200,
-        maxImagesize=500000,
-    )
-
-    pretrain, pretrain_uid_list = dataIteratorPreTrain(
-        args.encoderPretrainPklPath,
-        args.encoderPretrainCaptionPath,
-        batch_size=args.batch_size,
-        batch_Imagesize=500000,
-        maxImagesize=500000,
-    )
-
-    valid, valid_uid_list = dataIterator(
-        args.validPklPath,
-        args.validCaptionPath,
-        worddicts,
-        batch_size=args.batch_size,
-        batch_Imagesize=500000,
-        maxlen=200,
-        maxImagesize=500000,
-    )
-
-    pretrainValid, pretrainValid_uid_list = dataIterator(
-        args.encoderPretrainValidPklPath,
-        args.encoderPretrainValidCaptionPath,
-        batch_size=args.batch_size,
-        batch_Imagesize=500000,
-        maxImagesize=500000,
-    )
-
-    print("train lenth is ", len(train))
-    print("valid lenth is ", len(valid))
 
     # [bat, h, w, 1]
     x = tf.placeholder(tf.float32, shape=[None, None, None, 1])
@@ -1284,374 +1254,386 @@ def main(args):
 
     init = tf.global_variables_initializer()
 
-    uidx = 0
-    cost_s = 0
-    dispFreq = 100 if args.dispFreq is None else args.dispFreq
-    saveFreq = (
-        len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
-    )
-    sampleFreq = (
-        len(train) * args.epochSampleRatio
-        if args.sampleFreq is None
-        else args.sampleFreq
-    )
-    validFreq = (
-        len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
-    )
-    history_errs = []
-    estop = False
-    halfLrFlag = 0
-    patience = 15 if args.patience is None else args.patience
-    lrate = args.lr
+    
+    dispFreq = args.dispFreq
+    saveFreq = len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
+    sampleFreq = len(train) * args.epochSampleRatio if args.sampleFreq is None else args.sampleFreq
+    validFreq = len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
+    patience = args.patience
     logPath = "./log.txt" if args.logPath is None else args.logPath
-    log = open(logPath, "w")
+    
 
-    log.write("args:" + str(vars(args)))
-    log.write("patience:" + str(patience))
-    log.write("lr:" + str(lr))
-    log.write("saveFreq:" + str(saveFreq))
-    log.write("sampleFreq:" + str(sampleFreq))
-    log.write("validFreq:" + str(validFreq))
+    log.info("args:" + str(vars(args)))
+    log.info("patience:" + str(patience))
+    log.info("saveFreq:" + str(saveFreq))
+    log.info("sampleFreq:" + str(sampleFreq))
+    log.info("validFreq:" + str(validFreq))
 
     saver = tf.train.Saver()
 
     with tf.Session(config=config) as sess:
         sess.run(init)
-        print('inited')
-        print('start encoder pretrain')
-        history_valid_cost = []
-        for epoch in range(max_epoch):
-            n_samples = 0
-            random.shuffle(pretrain)
-            for batch_x, batch_y in pretrain:
-                batch_x, batch_x_m, batch_y = prepare_pretrain_data(batch_x, batch_y)
-                n_samples += len(batch_x)
-                uidx += 1
+        isPretrain = True
+        isTrain = True
+        if(agrs.mode=='pretrain'): isTrain = True
+        elif(agrs.mode=='train'): isPretrain = True            
+        if(args.isResume):
+            saver.restore(sess, os.path.join(args.modelPath, args.modelFileName) + ".ckpt")
+            log.info('model restored')
+        log.info('inited')
 
-                cost_i, _ = sess.run(
-                    [pretrain_cost, pretrain_trainer],
-                    feed_dict={
-                        x: batch_x,
-                        pretrain_y: batch_y,
-                        x_mask: batch_x_m,
-                        if_trainning: True,
-                        lr: lrate,
-                    },
-                )
+        if isPretrain:
+            log.info('start encoder pretrain')
+            log.info('loading data')
+            pretrain, pretrain_uid_list = dataIteratorPreTrain(
+                args.encoderPretrainPklPath,
+                args.encoderPretrainCaptionPath,
+                batch_size=args.batch_size,
+                batch_Imagesize=500000,
+                maxImagesize=500000,
+            )
+            pretrainValid, pretrainValid_uid_list = dataIterator(
+                args.encoderPretrainValidPklPath,
+                args.encoderPretrainValidCaptionPath,
+                batch_size=args.batch_size,
+                batch_Imagesize=500000,
+                maxImagesize=500000,
+            )
+            uidx = 0
+            cost_s = 0  
+            estop = False
+            halfLrFlag = 0
+            lrate = args.pretrainLr
+            history_valid_cost = []
+            log.info("train lenth is " +  str(len(pretrain)))
+            log.info("valid lenth is " + str(len(pretrainValid)))
+            for epoch in range(max_epoch):
+                n_samples = 0
+                random.shuffle(pretrain)
+                for batch_x, batch_y in pretrain:
+                    batch_x, batch_x_m, batch_y = prepare_pretrain_data(batch_x, batch_y)
+                    n_samples += len(batch_x)
+                    uidx += 1
 
-                cost_s += cost_i
-
-                if np.isnan(cost_i) or np.isinf(cost_i):
-                    print("invalid cost value detected")
-                    sys.exit(0)
-
-                if np.mod(uidx, dispFreq) == 0:
-                    cost_s /= dispFreq
-                    print(
-                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate
+                    cost_i, _ = sess.run(
+                        [pretrain_cost, pretrain_trainer],
+                        feed_dict={
+                            x: batch_x,
+                            pretrain_y: batch_y,
+                            x_mask: batch_x_m,
+                            if_trainning: True,
+                            lr: lrate,
+                        },
                     )
-                    log.write(
-                        "Epoch "
-                        + str(epoch)
-                        + " Update "
-                        + str(uidx)
-                        + " Cost "
-                        + str(cost_s)
-                        + " Lr "
-                        + str(lrate)
-                        + "\n"
-                    )
-                    cost_s = 0
 
-                if np.mod(uidx, validFreq) == 0:
-                    print("Start validating...")
-                    _t = time.time()
-                    probs = []
-                    valid_cost = 0
-                    for batch_x, batch_y in pretrain_valid:
-                        batch_x, batch_x_m, batch_y, batch_y_m = prepare_pretrain_data(
-                            batch_x, batch_y
+                    cost_s += cost_i
+
+                    if np.isnan(cost_i) or np.isinf(cost_i):
+                        log.info("invalid cost value detected")
+                        sys.exit(0)
+
+                    if np.mod(uidx, dispFreq) == 0:
+                        cost_s /= dispFreq
+                        log.info(
+                            "Epoch "
+                            + str(epoch)
+                            + " Update "
+                            + str(uidx)
+                            + " Cost "
+                            + str(cost_s)
+                            + " Lr "
+                            + str(lrate)
                         )
-                        valid_cost_i, _ = sess.run(
-                            [pretrain_cost, pretrain_trainer],
-                            feed_dict={
-                                x: batch_x,
-                                pretrain_y: batch_y,
-                                x_mask: batch_x_m,
-                                if_trainning: True,
-                                lr: lrate,
-                            },
-                        )
-                        valid_cost += valid_cost_i
-                    history_valid_cost.append(valid_cost)
+                        cost_s = 0
 
-                    if (
-                        uidx / validFreq == 0
-                        or valid_cost <= np.array(history_valid_cost).min()
-                    ):
-                        bad_counter = 0
-
-                    if (
-                        uidx / validFreq != 0
-                        and valid_cost > np.array(history_valid_cost).min()
-                    ):
-                        bad_counter += 1
-                        if bad_counter > patience:
-                            if halfLrFlag == 2:
-                                print("Early Stop!")
-                                log.write("Early Stop!\n")
-                                log.flush()
-                                estop = True
-                                break
-                            else:
-                                print("Lr decay and retrain!")
-                                log.write("Lr decay and retrain!\n")
-                                log.flush()
-                                bad_counter = 0
-                                lrate = lrate / 10
-                                halfLrFlag += 1
-                    print(f"bad_counter {bad_counter}")
-                    print(
-                        "Valid cost: %.2f%%"
-                        % (valid_cost)
-                    )
-                    log.write(
-                        "Valid cost: %.2f%%"
-                        % (valid_cost)
-                        + "\n"
-                    )
-                    log.flush()
-                    print(f"Done validating, took {time.time() - _t}.")
-
-                if np.mod(uidx, saveFreq) == 0:
-                    save_path = saver.save(
-                        sess, os.path.join(args.savePath + args.saveName) + ".ckpt"
-                    )
-            if estop:
-                break
-
-
-        print('start joint-train')
-        uidx = 0
-        cost_s = 0        
-        history_errs = []
-        estop = False
-        halfLrFlag = 0
-        lrate = args.lr
-        for epoch in range(max_epoch):
-            n_samples = 0
-            random.shuffle(train)
-            for batch_x, batch_y in train:
-                batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(batch_x, batch_y)
-                n_samples += len(batch_x)
-                uidx += 1
-
-                cost_i, _ = sess.run(
-                    [cost, trainer],
-                    feed_dict={
-                        x: batch_x,
-                        y: batch_y,
-                        x_mask: batch_x_m,
-                        y_mask: batch_y_m,
-                        if_trainning: True,
-                        lr: lrate,
-                    },
-                )
-
-                cost_s += cost_i
-
-                if np.isnan(cost_i) or np.isinf(cost_i):
-                    print("invalid cost value detected")
-                    sys.exit(0)
-
-                if np.mod(uidx, dispFreq) == 0:
-                    cost_s /= dispFreq
-                    print(
-                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate
-                    )
-                    log.write(
-                        "Epoch "
-                        + str(epoch)
-                        + " Update "
-                        + str(uidx)
-                        + " Cost "
-                        + str(cost_s)
-                        + " Lr "
-                        + str(lrate)
-                        + "\n"
-                    )
-                    cost_s = 0
-
-                if np.mod(uidx, sampleFreq) == 0:
-                    print("Start sampling...")
-                    _t = time.time()
-                    fpp_sample = open(
-                        os.path.join(args.resultPath, f"{args.resultFileName}.txt"), "w"
-                    )
-                    valid_count_idx = 0
-                    for batch_x, batch_y in valid:
-                        for xx in batch_x:
-                            xx = np.moveaxis(xx, 0, -1)
-                            xx_pad = np.zeros(
-                                (xx.shape[0], xx.shape[1], xx.shape[2]), dtype="float32"
+                    if np.mod(uidx, validFreq) == 0:
+                        log.info("Start validating...")
+                        _t = time.time()
+                        probs = []
+                        valid_cost = 0
+                        for batch_x, batch_y in pretrain_valid:
+                            batch_x, batch_x_m, batch_y, batch_y_m = prepare_pretrain_data(batch_x, batch_y)
+                            valid_cost_i, _ = sess.run(
+                                [pretrain_cost, pretrain_trainer],
+                                feed_dict={
+                                    x: batch_x,
+                                    pretrain_y: batch_y,
+                                    x_mask: batch_x_m,
+                                    if_trainning: True,
+                                    lr: lrate,
+                                },
                             )
-                            xx_pad[:, :, :] = xx / 255.0
-                            xx_pad = xx_pad[None, :, :, :]
-                            annotA, annotB = sess.run(
-                                [A_annotation, B_annotation],
-                                feed_dict={x: xx_pad, if_trainning: False},
-                            )
-                            h_state = sess.run(
-                                hidden_state_0, feed_dict={annoA: annotA, annoB: annotB}
-                            )
+                            valid_cost += valid_cost_i
+                        history_valid_cost.append(valid_cost)
 
-                            sample, score = wap.get_sample(
-                                p,
-                                w,
-                                h,
-                                alphaA,
-                                annotA,
-                                alphaB,
-                                annotB,
-                                h_state,
-                                10,
-                                200,
-                                False,
-                                sess,
-                                training=False,
-                            )
-                            score = score / np.array([len(s) for s in sample])
-                            ss = sample[score.argmin()]
-                            fpp_sample.write(valid_uid_list[valid_count_idx])
-                            valid_count_idx = valid_count_idx + 1
-                            if np.mod(valid_count_idx, 100) == 0:
-                                print("gen %d samples" % valid_count_idx)
-                                log.write("gen %d samples" % valid_count_idx + "\n")
-                                log.flush()
-                            for vv in ss:
-                                if vv == 0:  # <eol>
+                        if (
+                            uidx / validFreq == 0
+                            or valid_cost <= np.array(history_valid_cost).min()
+                        ):
+                            bad_counter = 0
+
+                        if (
+                            uidx / validFreq != 0
+                            and valid_cost > np.array(history_valid_cost).min()
+                        ):
+                            bad_counter += 1
+                            if bad_counter > patience:
+                                if halfLrFlag == 2:
+                                    log.info("Early Stop!")
+                                    estop = True
                                     break
-                                fpp_sample.write(" " + worddicts_r[vv])
-                            fpp_sample.write("\n")
-                    fpp_sample.close()
-                    print("valid set decode done")
-                    log.write("valid set decode done\n")
-                    log.flush()
-                    print(f"Done sampling, took {time.time() - _t}.")
-
-                if np.mod(uidx, validFreq) == 0:
-                    print("Start validating...")
-                    _t = time.time()
-                    probs = []
-                    for batch_x, batch_y in valid:
-                        batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(
-                            batch_x, batch_y
+                                else:
+                                    log.info("Lr decay and retrain!")
+                                    bad_counter = 0
+                                    lrate = lrate / 10
+                                    halfLrFlag += 1
+                        log.info(f"bad_counter {bad_counter}")
+                        log.info(
+                            "Valid cost: %.2f%%"
+                            % (valid_cost)
                         )
-                        pprobs, annotA, annotB = sess.run(
-                            [cost, A_annotation, B_annotation],
-                            feed_dict={
-                                x: batch_x,
-                                y: batch_y,
-                                x_mask: batch_x_m,
-                                y_mask: batch_y_m,
-                                if_trainning: False,
-                            },
+                        log.info(f"Done validating, took {time.time() - _t}.")
+
+                    if np.mod(uidx, saveFreq) == 0:
+                        save_path = saver.save(
+                            sess, os.path.join(args.savePath + args.saveName) + ".ckpt"
                         )
-                        probs.append(pprobs)
-                    valid_errs = np.array(probs)
-                    valid_err_cost = valid_errs.mean()
+                if estop:
+                    break
 
-                    wer_process(
-                        os.path.join(args.resultPath, f"{args.resultFileName}.txt"),
-                        args.validCaptionPath,
-                        os.path.join(args.resultPath, f"{args.resultFileName}.wer"),
-                    )
-                    fpp = open(
-                        os.path.join(args.resultPath, f"{args.resultFileName}.wer")
-                    )
-                    stuff = fpp.readlines()
-                    fpp.close()
-                    m = re.search("WER (.*)\n", stuff[0])
-                    valid_per = 100.0 * float(m.group(1))
-                    m = re.search("ExpRate (.*)\n", stuff[1])
-                    valid_sacc = 100.0 * float(m.group(1))
-                    valid_err = valid_per
+        if isTrain:
+            log.info('start joint-train')
+            log.info('Loading data')
+            train, train_uid_list = dataIterator(
+                args.trainPklPath,
+                args.trainCaptionPath,
+                worddicts,
+                batch_size=args.batch_size,
+                batch_Imagesize=500000,
+                maxlen=200,
+                maxImagesize=500000,
+            )
 
-                    history_errs.append(valid_err)
+            valid, valid_uid_list = dataIterator(
+                args.validPklPath,
+                args.validCaptionPath,
+                worddicts,
+                batch_size=args.batch_size,
+                batch_Imagesize=500000,
+                maxlen=200,
+                maxImagesize=500000,
+            )
+            uidx = 0
+            cost_s = 0        
+            history_errs = []
+            estop = False
+            halfLrFlag = 0
+            lrate = args.lr
+            for epoch in range(max_epoch):
+                n_samples = 0
+                random.shuffle(train)
+                for batch_x, batch_y in train:
+                    batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(batch_x, batch_y)
+                    n_samples += len(batch_x)
+                    uidx += 1
 
-                    if (
-                        uidx / validFreq == 0
-                        or valid_err <= np.array(history_errs).min()
-                    ):
-                        bad_counter = 0
+                    cost_i, _ = sess.run(
+                        [cost, trainer],
+                        feed_dict={
+                            x: batch_x,
+                            y: batch_y,
+                            x_mask: batch_x_m,
+                            y_mask: batch_y_m,
+                            if_trainning: True,
+                            lr: lrate,
+                        },
+                    )
 
-                    if (
-                        uidx / validFreq != 0
-                        and valid_err > np.array(history_errs).min()
-                    ):
-                        bad_counter += 1
-                        if bad_counter > patience:
-                            if halfLrFlag == 2:
-                                print("Early Stop!")
-                                log.write("Early Stop!\n")
-                                log.flush()
-                                estop = True
-                                break
-                            else:
-                                print("Lr decay and retrain!")
-                                log.write("Lr decay and retrain!\n")
-                                log.flush()
-                                bad_counter = 0
-                                lrate = lrate / 10
-                                halfLrFlag += 1
-                    print(f"bad_counter {bad_counter}")
-                    print(
-                        "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
-                        % (valid_per, valid_sacc, valid_err_cost)
-                    )
-                    log.write(
-                        "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
-                        % (valid_per, valid_sacc, valid_err_cost)
-                        + "\n"
-                    )
-                    log.flush()
-                    print(f"Done validating, took {time.time() - _t}.")
+                    cost_s += cost_i
 
-                if np.mod(uidx, saveFreq) == 0:
-                    save_path = saver.save(
-                        sess, os.path.join(args.savePath + args.saveName) + ".ckpt"
-                    )
-            if estop:
-                break
+                    if np.isnan(cost_i) or np.isinf(cost_i):
+                        log.info("invalid cost value detected")
+                        sys.exit(0)
+
+                    if np.mod(uidx, dispFreq) == 0:
+                        cost_s /= dispFreq
+                        log.info(
+                            "Epoch "
+                            + str(epoch)
+                            + " Update "
+                            + str(uidx)
+                            + " Cost "
+                            + str(cost_s)
+                            + " Lr "
+                            + str(lrate)
+                        )
+                        cost_s = 0
+
+                    if np.mod(uidx, sampleFreq) == 0:
+                        log.info("Start sampling...")
+                        _t = time.time()
+                        fpp_sample = open(
+                            os.path.join(args.resultPath, f"{args.resultFileName}.txt"), "w"
+                        )
+                        valid_count_idx = 0
+                        for batch_x, batch_y in valid:
+                            for xx in batch_x:
+                                xx = np.moveaxis(xx, 0, -1)
+                                xx_pad = np.zeros(
+                                    (xx.shape[0], xx.shape[1], xx.shape[2]), dtype="float32"
+                                )
+                                xx_pad[:, :, :] = xx / 255.0
+                                xx_pad = xx_pad[None, :, :, :]
+                                annotA, annotB = sess.run(
+                                    [A_annotation, B_annotation],
+                                    feed_dict={x: xx_pad, if_trainning: False},
+                                )
+                                h_state = sess.run(
+                                    hidden_state_0, feed_dict={annoA: annotA, annoB: annotB}
+                                )
+
+                                sample, score = wap.get_sample(
+                                    p,
+                                    w,
+                                    h,
+                                    alphaA,
+                                    annotA,
+                                    alphaB,
+                                    annotB,
+                                    h_state,
+                                    10,
+                                    200,
+                                    False,
+                                    sess,
+                                    training=False,
+                                )
+                                score = score / np.array([len(s) for s in sample])
+                                ss = sample[score.argmin()]
+                                fpp_sample.write(valid_uid_list[valid_count_idx])
+                                valid_count_idx = valid_count_idx + 1
+                                if np.mod(valid_count_idx, 100) == 0:
+                                    log.info("gen %d samples" % valid_count_idx + "\n")
+                                for vv in ss:
+                                    if vv == 0:  # <eol>
+                                        break
+                                    fpp_sample.write(" " + worddicts_r[vv])
+                                fpp_sample.write("\n")
+                        fpp_sample.close()
+                        log.info(f"Done sampling, took {time.time() - _t}.")
+
+                    if np.mod(uidx, validFreq) == 0:
+                        log.info("Start validating...")
+                        _t = time.time()
+                        probs = []
+                        for batch_x, batch_y in valid:
+                            batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(
+                                batch_x, batch_y
+                            )
+                            pprobs, annotA, annotB = sess.run(
+                                [cost, A_annotation, B_annotation],
+                                feed_dict={
+                                    x: batch_x,
+                                    y: batch_y,
+                                    x_mask: batch_x_m,
+                                    y_mask: batch_y_m,
+                                    if_trainning: False,
+                                },
+                            )
+                            probs.append(pprobs)
+                        valid_errs = np.array(probs)
+                        valid_err_cost = valid_errs.mean()
+
+                        wer_process(
+                            os.path.join(args.resultPath, f"{args.resultFileName}.txt"),
+                            args.validCaptionPath,
+                            os.path.join(args.resultPath, f"{args.resultFileName}.wer"),
+                        )
+                        fpp = open(
+                            os.path.join(args.resultPath, f"{args.resultFileName}.wer")
+                        )
+                        stuff = fpp.readlines()
+                        fpp.close()
+                        m = re.search("WER (.*)\n", stuff[0])
+                        valid_per = 100.0 * float(m.group(1))
+                        m = re.search("ExpRate (.*)\n", stuff[1])
+                        valid_sacc = 100.0 * float(m.group(1))
+                        valid_err = valid_per
+
+                        history_errs.append(valid_err)
+
+                        if (
+                            uidx / validFreq == 0
+                            or valid_err <= np.array(history_errs).min()
+                        ):
+                            bad_counter = 0
+
+                        if (
+                            uidx / validFreq != 0
+                            and valid_err > np.array(history_errs).min()
+                        ):
+                            bad_counter += 1
+                            if bad_counter > patience:
+                                if halfLrFlag == 2:
+                                    log.info("Early Stop!\n")
+                                    estop = True
+                                    break
+                                else:
+                                    log.info("Lr decay and retrain!\n")
+                                    bad_counter = 0
+                                    lrate = lrate / 10
+                                    halfLrFlag += 1
+                        log.info(f"bad_counter {bad_counter}")
+                        log.info(
+                            "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
+                            % (valid_per, valid_sacc, valid_err_cost)
+                            + "\n"
+                        )
+                        log.info(f"Done validating, took {time.time() - _t}.")
+
+                    if np.mod(uidx, saveFreq) == 0:
+                        save_path = saver.save(
+                            sess, os.path.join(args.savePath + args.saveName) + ".ckpt"
+                        )
+                if estop:
+                    break
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("dictPath", type=str)
-    parser.add_argument("trainPklPath", type=str)
-    parser.add_argument("trainCaptionPath", type=str)
-    parser.add_argument("validPklPath", type=str)
-    parser.add_argument("validCaptionPath", type=str)
-    parser.add_argument("encoderPretrainPklPath", type=str)
-    parser.add_argument("encoderPretrainCaptionPath", type=str)
-    parser.add_argument("encoderPretrainValidPklPath", type=str)
-    parser.add_argument("encoderPretrainValidCaptionPath", type=str)
-    parser.add_argument("resultPath", type=str)
-    parser.add_argument("--pretrainLr", type=float)
-    parser.add_argument("--logPath", type=str)
-    parser.add_argument("--batch_size", type=int, default=6)
-    parser.add_argument("--dispFreq", type=int)
+    parser.add_argument('--mode', type=str, choices=['pretrain', 'train', 'both'], required=True)
+    parser.add_argument("--logPath", type=str, required=True)
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--patience", type=int, required=True)
     parser.add_argument("--saveFreq", type=int)
-    parser.add_argument("--sampleFreq", type=int)
-    parser.add_argument("--validFreq", type=int)
-    parser.add_argument("--patience", type=int)
-    parser.add_argument("--epochDispRatio", type=int, default=1)
-    parser.add_argument("--epochSampleRatio", type=int, default=1)
-    parser.add_argument("--epochValidRatio", type=int, default=1)
-    parser.add_argument("--lr", type=float, default=1)
-    parser.add_argument("--resultFileName", type=str, default="valid")
     parser.add_argument("--savePath", type=str, default="./trained/")
-    parser.add_argument("--saveName", type=str)
+    parser.add_argument("--saveName", type=str, required=True)
+    parser.add_argument("--dispFreq", type=int)
+    parser.add_argument("--validFreq", type=int)
+    parser.add_argument("--epochDispRatio", type=int, default=1)
+    parser.add_argument("--epochValidRatio", type=int, default=1)
+
+    parser.add_argument("--isResume", type = bool, required=True)
+    parser.add_argument("--modelFileName", type=str)
+    parser.add_argument("--modelPath", type=str, default="./trained/")
+    
+    # pretrain
+    parser.add_argument("--encoderPretrainPklPath", type=str)
+    parser.add_argument("--encoderPretrainCaptionPath", type=str)
+    parser.add_argument("--encoderPretrainValidPklPath", type=str)
+    parser.add_argument("--encoderPretrainValidCaptionPath", type=str)
+    parser.add_argument("--pretrainLr", type=float)
+
+    # train
+    parser.add_argument("--dictPath", type=str)
+    parser.add_argument("--trainPklPath", type=str)
+    parser.add_argument("--trainCaptionPath", type=str)
+    parser.add_argument("--validPklPath", type=str)
+    parser.add_argument("--validCaptionPath", type=str)
+    parser.add_argument("--resultPath", type=str)
+    parser.add_argument("--resultFileName", type=str, default="valid")
+    parser.add_argument("--lr", type=float, default=1)
+    parser.add_argument("--sampleFreq", type=int)
+    parser.add_argument("--epochSampleRatio", type=int, default=1)
     (args, unknown) = parser.parse_known_args()
     print(f"Run with args {args}")
     main(args)
