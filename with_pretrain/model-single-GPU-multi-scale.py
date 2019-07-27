@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.contrib.layers import batch_norm
 from tensorflow.contrib.framework import arg_scope
 import numpy as np
-from data import dataIterator, load_dict, prepare_data
+from data import dataIterator, dataIteratorPretrain, load_dict, prepare_data, prepare_pretrain_data
 from compute_wer import process as wer_process
 import random
 import sys
@@ -1285,14 +1285,14 @@ def main(args):
         if isPretrain:
             log.info('start encoder pretrain')
             log.info('loading data')
-            pretrain, pretrain_uid_list = dataIteratorPreTrain(
+            pretrain, pretrain_uid_list = dataIteratorPretrain(
                 args.encoderPretrainPklPath,
                 args.encoderPretrainCaptionPath,
                 batch_size=args.batch_size,
                 batch_Imagesize=500000,
                 maxImagesize=500000,
             )
-            pretrainValid, pretrainValid_uid_list = dataIterator(
+            pretrainValid, pretrainValid_uid_list = dataIteratorPretrain(
                 args.encoderPretrainValidPklPath,
                 args.encoderPretrainValidCaptionPath,
                 batch_size=args.batch_size,

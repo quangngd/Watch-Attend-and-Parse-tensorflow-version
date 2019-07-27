@@ -84,18 +84,29 @@ def dataIterator(feature_file,label_file,dictionary,batch_size,batch_Imagesize,m
     return list(zip(feature_total,label_total)),uidList
 
 def dataIteratorPretrain(feature_file,y_file,batch_size,batch_Imagesize,maxImagesize):
-    """
-    Args:
-        y_file: pkl file with format {uid: y}
-    """
     
     fp=open(feature_file,'rb')
     features=pkl.load(fp, encoding='latin1')
     fp.close()
 
     fp2=open(y_file,'rb')
-    y = pkl.load(fp2, encoding='latin1')
+    labels = pkl.load(fp2)
     fp2.close()
+
+
+    targets={}
+    # map word to int with dictionary
+    for l in labels:
+        tmp=l.strip().split('\t')
+        uid=tmp[0]
+        w_list=[]
+        for w in tmp[1].split(' '):
+            if w in dictionary:
+                w_list.append(dictionary[w])
+            else:
+                print('a word not in the dictionary !! sentence ',uid,'word ', w)
+                sys.exit()
+        targets[uid]=w_list
 
     imageSize={}
     for uid,fea in features.items():
@@ -117,7 +128,7 @@ def dataIteratorPretrain(feature_file,y_file,batch_size,batch_Imagesize,maxImage
         if size>biggest_image_size:
             biggest_image_size=size
         fea=features[uid]
-        lab=y[uid]
+        lab=targets[uid]
         batch_image_size=biggest_image_size*(i+1)
         if size>maxImagesize:
             print('image', uid, 'size bigger than', maxImagesize, 'ignore')
