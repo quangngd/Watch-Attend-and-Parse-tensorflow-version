@@ -80,7 +80,7 @@ for labelPath, imgDir, imgFromIdFunc, labelRegex, savePath in zip(labelPaths, im
         print('Save pkl done')
 
     with open(savePath + ".txt", "w") as saveFile:
-        for k, v in labels:
+        for k, v in labels.items():
             saveFile.write(f"{k}\t{v}\n")
         print('Save txt done')
                     
