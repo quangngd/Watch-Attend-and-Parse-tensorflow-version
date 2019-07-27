@@ -49,6 +49,7 @@ Format:
 for labelPath, imgDir, imgFromIdFunc, labelRegex, savePath in zip(labelPaths, imgDirs, imgFromIdFuncs, labelRegexs, savePaths):
     features = {}
     labels = {}
+    filesNotFound = []
     cnt = 0
     juncnt = 0
     with open(labelPath, "r") as labelFile:
@@ -65,7 +66,11 @@ for labelPath, imgDir, imgFromIdFunc, labelRegex, savePath in zip(labelPaths, im
                     if "junk" in label:
                         juncnt+=1
                         continue
-                    im =  np.array(Image.open(os.path.join(imgDir,imgFromIdFunc(key))).convert('L'))
+                    try:
+                        im =  np.array(Image.open(os.path.join(imgDir,imgFromIdFunc(key))).convert('L'))
+                    except FileNotFoundError:
+                        filesNotFound.append(imgFromIdFunc(key))
+                        continue
                     features[key] = im
                     labels[key] = label
                     
@@ -74,6 +79,7 @@ for labelPath, imgDir, imgFromIdFunc, labelRegex, savePath in zip(labelPaths, im
                         print(f"Loaded {cnt} im")
     print(f"Done. Loaded {cnt} im.")
     print(f"Skip {juncnt} junks")
+    print(f"Skip {",".join(filesNotFound)} file not found")
 
     with open(savePath + ".pkl", "wb") as saveFile:
         pickle.dump(features, saveFile)
