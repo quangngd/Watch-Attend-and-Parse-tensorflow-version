@@ -13,6 +13,7 @@ import os
 import time
 import math
 import argparse
+import logging
 
 rng = np.random.RandomState(int(time.time()))
 
@@ -1088,19 +1089,16 @@ def main(args):
     global annoA, infer_y, h_pre, alphaA_past, if_trainning, dictLen, annoB, alphaB_past
 
 
-    # Logging setup
-    log=logging.getLogger()
-    fileHandler = logging.FileHandler(logPath)
-    log.addHandler(fileHandler)
-    consoleHandler = logging.StreamHandler()
-    log.addHandler(consoleHandler)
-
-
     worddicts = load_dict(args.dictPath)
     dictLen = len(worddicts)
     worddicts_r = [None] * len(worddicts)
     for kk, vv in worddicts.items():
         worddicts_r[vv] = kk
+
+    pretrainDict=[]
+    with open(args.pretrainDictionaryPath) as f:
+        pretrainDict = f.read().strip().split('\n')
+
 
     # [bat, h, w, 1]
     x = tf.placeholder(tf.float32, shape=[None, None, None, 1])
@@ -1130,27 +1128,45 @@ def main(args):
 
     #### Pretrain model ####
 
-    pretrain_y = tf.placeholder(tf.float32, shape =[None, dictLen])
+    pretrainDictLen = len(pretrainDict)
+    log.info(f'pretrain total phones {pretrainDictLen}')
+    pretrain_y = tf.placeholder(tf.float32, shape =[None, pretrainDictLen])
+    pretrainLr = tf.placeholder(tf.float32)
 
-    pretrain_annotation = tf.concat([A_annotation, B_annotation], axis=-1) # [bat, H, W, C_A + C_B]
+    A_annotation_pretrain = tf.layers.conv2d(
+        inputs=A_annotation,
+        filters=pretrainDictLen,
+        kernel_size=(1,1)
+    ) # [bat, h, w, dictlen]
+    B_annotation_pretrain = tf.layers.conv2d(
+        inputs=B_annotation,
+        filters=pretrainDictLen,
+        kernel_size=(1,1)
+    ) # [bat, h, w, dictlen]
 
-    pretrain_out = tf.layers.dense(
-        inputs=pretrain_annotation,
-        units=dictLen
-    ) # [bat, H, W, dictLen]
-
-    pretrain_out = tf.reduce_max(
-        pretrain_out,
-        axis=(1,2)
+    A_annotation_pretrain = tf.reduce_max(
+        A_annotation_pretrain,
+        axis=[1,2]
     ) # [bat, dictLen]
+    B_annotation_pretrain = tf.reduce_max(
+        B_annotation_pretrain,
+        axis=[1,2]
+    ) # [bat, dictLen]
+
+    pretrain_annotation = tf.maximum(
+        A_annotation_pretrain, 
+        B_annotation_pretrain
+    ) # [bat, dictLen]
+
+    pretrain_out = pretrain_annotation
 
     pretrain_cost = tf.losses.sigmoid_cross_entropy(
         pretrain_y,
         pretrain_out,
     )
 
-    pretrain_optimizer = tf.train.AdadeltaOptimizer(learning_rate= 1.0 if args.pretrainLr is None else args.pretrainLr)
-    pretrain_trainer = optimizer.minimize(pretrain_cost)
+    pretrain_optimizer = tf.train.AdadeltaOptimizer(learning_rate= pretrainLr)
+    pretrain_trainer = pretrain_optimizer.minimize(pretrain_cost)
     ########################
 
     # for initilaizing validation
@@ -1256,18 +1272,11 @@ def main(args):
 
     
     dispFreq = args.dispFreq
-    saveFreq = len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
-    sampleFreq = len(train) * args.epochSampleRatio if args.sampleFreq is None else args.sampleFreq
-    validFreq = len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
     patience = args.patience
-    logPath = "./log.txt" if args.logPath is None else args.logPath
     
 
     log.info("args:" + str(vars(args)))
     log.info("patience:" + str(patience))
-    log.info("saveFreq:" + str(saveFreq))
-    log.info("sampleFreq:" + str(sampleFreq))
-    log.info("validFreq:" + str(validFreq))
 
     saver = tf.train.Saver()
 
@@ -1275,8 +1284,8 @@ def main(args):
         sess.run(init)
         isPretrain = True
         isTrain = True
-        if(agrs.mode=='pretrain'): isTrain = True
-        elif(agrs.mode=='train'): isPretrain = True            
+        if(args.mode=='pretrain'): isTrain = False
+        elif(args.mode=='train'): isPretrain = False            
         if(args.isResume):
             saver.restore(sess, os.path.join(args.modelPath, args.modelFileName) + ".ckpt")
             log.info('model restored')
@@ -1285,33 +1294,38 @@ def main(args):
         if isPretrain:
             log.info('start encoder pretrain')
             log.info('loading data')
+
             pretrain, pretrain_uid_list = dataIteratorPretrain(
                 args.encoderPretrainPklPath,
                 args.encoderPretrainCaptionPath,
                 batch_size=args.batch_size,
                 batch_Imagesize=500000,
                 maxImagesize=500000,
+                dictionary=pretrainDict
             )
-            pretrainValid, pretrainValid_uid_list = dataIteratorPretrain(
+            pretrain_valid, pretrain_valid_uid_list = dataIteratorPretrain(
                 args.encoderPretrainValidPklPath,
                 args.encoderPretrainValidCaptionPath,
                 batch_size=args.batch_size,
                 batch_Imagesize=500000,
                 maxImagesize=500000,
+                dictionary=pretrainDict
             )
+            saveFreq = len(pretrain) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
+            validFreq = len(pretrain) * args.epochValidRatio if args.validFreq is None else args.validFreq
             uidx = 0
             cost_s = 0  
             estop = False
             halfLrFlag = 0
-            lrate = args.pretrainLr
+            lrate = float(args.pretrainLr)
             history_valid_cost = []
             log.info("train lenth is " +  str(len(pretrain)))
-            log.info("valid lenth is " + str(len(pretrainValid)))
+            log.info("valid lenth is " + str(len(pretrain_valid)))
             for epoch in range(max_epoch):
                 n_samples = 0
                 random.shuffle(pretrain)
                 for batch_x, batch_y in pretrain:
-                    batch_x, batch_x_m, batch_y = prepare_pretrain_data(batch_x, batch_y)
+                    batch_x, batch_x_m, batch_y = prepare_pretrain_data(batch_x, batch_y, pretrainDictLen)
                     n_samples += len(batch_x)
                     uidx += 1
 
@@ -1322,7 +1336,7 @@ def main(args):
                             pretrain_y: batch_y,
                             x_mask: batch_x_m,
                             if_trainning: True,
-                            lr: lrate,
+                            pretrainLr: lrate,
                         },
                     )
 
@@ -1352,7 +1366,7 @@ def main(args):
                         probs = []
                         valid_cost = 0
                         for batch_x, batch_y in pretrain_valid:
-                            batch_x, batch_x_m, batch_y, batch_y_m = prepare_pretrain_data(batch_x, batch_y)
+                            batch_x, batch_x_m, batch_y = prepare_pretrain_data(batch_x, batch_y, pretrainDictLen)
                             valid_cost_i, _ = sess.run(
                                 [pretrain_cost, pretrain_trainer],
                                 feed_dict={
@@ -1360,7 +1374,7 @@ def main(args):
                                     pretrain_y: batch_y,
                                     x_mask: batch_x_m,
                                     if_trainning: True,
-                                    lr: lrate,
+                                    pretrainLr: lrate,
                                 },
                             )
                             valid_cost += valid_cost_i
@@ -1385,7 +1399,7 @@ def main(args):
                                 else:
                                     log.info("Lr decay and retrain!")
                                     bad_counter = 0
-                                    lrate = lrate / 10
+                                    lrate = lrate / 10.0
                                     halfLrFlag += 1
                         log.info(f"bad_counter {bad_counter}")
                         log.info(
@@ -1404,6 +1418,7 @@ def main(args):
         if isTrain:
             log.info('start joint-train')
             log.info('Loading data')
+
             train, train_uid_list = dataIterator(
                 args.trainPklPath,
                 args.trainCaptionPath,
@@ -1423,10 +1438,14 @@ def main(args):
                 maxlen=200,
                 maxImagesize=500000,
             )
+            saveFreq = len(train) * args.epochDispRatio if args.saveFreq is None else args.saveFreq
+            sampleFreq = len(train) * args.epochSampleRatio if args.sampleFreq is None else args.sampleFreq
+            validFreq = len(train) * args.epochValidRatio if args.validFreq is None else args.validFreq
             uidx = 0
             cost_s = 0        
             history_errs = []
             estop = False
+            isBest = True
             halfLrFlag = 0
             lrate = args.lr
             for epoch in range(max_epoch):
@@ -1566,12 +1585,14 @@ def main(args):
                             or valid_err <= np.array(history_errs).min()
                         ):
                             bad_counter = 0
+                            isBest = True
 
                         if (
                             uidx / validFreq != 0
                             and valid_err > np.array(history_errs).min()
                         ):
                             bad_counter += 1
+                            isBest = False
                             if bad_counter > patience:
                                 if halfLrFlag == 2:
                                     log.info("Early Stop!\n")
@@ -1591,9 +1612,11 @@ def main(args):
                         log.info(f"Done validating, took {time.time() - _t}.")
 
                     if np.mod(uidx, saveFreq) == 0:
-                        save_path = saver.save(
-                            sess, os.path.join(args.savePath + args.saveName) + ".ckpt"
-                        )
+                        if(isBest):
+                            save_path = saver.save(
+                                sess, os.path.join(args.savePath + args.saveName) + ".ckpt"
+                            )
+                            isBest = False
                 if estop:
                     break
 
@@ -1604,15 +1627,14 @@ if __name__ == "__main__":
     parser.add_argument("--logPath", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--patience", type=int, required=True)
-    parser.add_argument("--saveFreq", type=int)
+    parser.add_argument("--saveFreq", type=int, default=100)
     parser.add_argument("--savePath", type=str, default="./trained/")
     parser.add_argument("--saveName", type=str, required=True)
-    parser.add_argument("--dispFreq", type=int)
+    parser.add_argument("--dispFreq", type=int, default=100)
     parser.add_argument("--validFreq", type=int)
-    parser.add_argument("--epochDispRatio", type=int, default=1)
     parser.add_argument("--epochValidRatio", type=int, default=1)
 
-    parser.add_argument("--isResume", type = bool, required=True)
+    parser.add_argument("--isResume", type = int, required=True)
     parser.add_argument("--modelFileName", type=str)
     parser.add_argument("--modelPath", type=str, default="./trained/")
     
@@ -1621,6 +1643,7 @@ if __name__ == "__main__":
     parser.add_argument("--encoderPretrainCaptionPath", type=str)
     parser.add_argument("--encoderPretrainValidPklPath", type=str)
     parser.add_argument("--encoderPretrainValidCaptionPath", type=str)
+    parser.add_argument("--pretrainDictionaryPath", type=str)
     parser.add_argument("--pretrainLr", type=float)
 
     # train
@@ -1635,6 +1658,21 @@ if __name__ == "__main__":
     parser.add_argument("--sampleFreq", type=int)
     parser.add_argument("--epochSampleRatio", type=int, default=1)
     (args, unknown) = parser.parse_known_args()
-    print(f"Run with args {args}")
+
+
+    # Logging setup
+    logPath = "./log.txt" if args.logPath is None else args.logPath
+    log=logging.getLogger()
+    log.setLevel(logging.DEBUG)
+
+    fileHandler = logging.FileHandler(logPath)
+    fileHandler.setLevel(logging.DEBUG)
+    log.addHandler(fileHandler)
+
+    consoleHandler = logging.StreamHandler()
+    consoleHandler.setLevel(logging.DEBUG)
+    log.addHandler(consoleHandler)
+
+    log.info(f"Run with args {args}")
     main(args)
 

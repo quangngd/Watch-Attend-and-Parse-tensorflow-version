@@ -83,15 +83,19 @@ def dataIterator(feature_file,label_file,dictionary,batch_size,batch_Imagesize,m
 
     return list(zip(feature_total,label_total)),uidList
 
-def dataIteratorPretrain(feature_file,y_file,batch_size,batch_Imagesize,maxImagesize):
+def dataIteratorPretrain(feature_file,y_file,batch_size,batch_Imagesize,maxImagesize, dictionary):
     
     fp=open(feature_file,'rb')
     features=pkl.load(fp, encoding='latin1')
     fp.close()
 
-    fp2=open(y_file,'rb')
-    labels = pkl.load(fp2)
+    fp2=open(y_file,'r')
+    labels = fp2.read().strip().split('\n')
     fp2.close()
+
+    wToId = {}
+    for i, w in enumerate(dictionary):
+        wToId[w] = i
 
 
     targets={}
@@ -99,18 +103,30 @@ def dataIteratorPretrain(feature_file,y_file,batch_size,batch_Imagesize,maxImage
     for l in labels:
         tmp=l.strip().split('\t')
         uid=tmp[0]
-        w_list=[]
-        for w in tmp[1].split(' '):
-            if w in dictionary:
-                w_list.append(dictionary[w])
-            else:
-                print('a word not in the dictionary !! sentence ',uid,'word ', w)
-                sys.exit()
-        targets[uid]=w_list
+        try:
+            label = tmp[1]
+        except IndexError:
+            print(f"Index Error when reading label = tmp[1] at {l}")
+            sys.exit()
+        if label in dictionary:
+            targets[uid]=numpy.zeros(len(dictionary))
+            targets[uid][wToId[label]] = 1
+        else:
+            print('a word not in the dictionary !! sentence ',uid,'word ', w)
+            sys.exit()
 
     imageSize={}
     for uid,fea in features.items():
-        imageSize[uid]=fea.shape[1]*fea.shape[2]
+        try:
+            if(fea.shape[1]*fea.shape[2] > maxImagesize):
+                print(f"image {uid}, size {fea.shape} bigger than {maxImagesize},  ignored")
+            else:
+                imageSize[uid]=fea.shape[1]*fea.shape[2]
+        except IndexError as e:
+            print(e)
+            print(fea.shape)
+            sys.exit()
+
 
     imageSize= sorted(imageSize.items(), key=lambda d:d[1]) # sorted by sentence length,  return a list with each triple element
 
@@ -131,7 +147,7 @@ def dataIteratorPretrain(feature_file,y_file,batch_size,batch_Imagesize,maxImage
         lab=targets[uid]
         batch_image_size=biggest_image_size*(i+1)
         if size>maxImagesize:
-            print('image', uid, 'size bigger than', maxImagesize, 'ignore')
+            print('image', uid, 'size ', size, ' bigger than', maxImagesize, 'ignore')
         else:
             uidList.append(uid)
             if batch_image_size>batch_Imagesize or i==batch_size: # a batch is full
@@ -211,7 +227,7 @@ def prepare_pretrain_data(images_x, seqs_y, dictLen):
     max_width_x = numpy.max(widths_x)
 
     x = numpy.zeros((n_samples, max_height_x, max_width_x, 1)).astype('float32')
-    x_mask = numpy.zeros((n_samples, max_height_x, max_width_x)).astype('float32'
+    x_mask = numpy.zeros((n_samples, max_height_x, max_width_x)).astype('float32')
     for idx, [s_x, s_y] in enumerate(zip(images_x, seqs_y)):
         x[idx, :heights_x[idx], :widths_x[idx], :] = (numpy.moveaxis(s_x, 0, -1) / 255.) # [B, C, H, W] -> [B, H, W, C]
         x_mask[idx, :heights_x[idx], :widths_x[idx]] = 1.
