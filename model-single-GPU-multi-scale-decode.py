@@ -1231,7 +1231,6 @@ def main(args):
     saver = tf.train.Saver()
 
     with tf.Session(config=config) as sess:
-        writer = tf.summary.FileWriter("logs", sess.graph)
         sess.run(init)
         saver.restore(sess, os.path.join(args.modelPath, args.modelFileName) + ".ckpt")
 

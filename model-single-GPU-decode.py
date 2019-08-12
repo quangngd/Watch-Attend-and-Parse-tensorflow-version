@@ -3,6 +3,7 @@ from tensorflow.contrib.layers import batch_norm
 from tensorflow.contrib.framework import arg_scope
 import numpy as np
 from data import dataIterator, load_dict, prepare_data
+from compute_wer import process as wer_process
 import random
 import sys
 import copy
@@ -14,6 +15,9 @@ import math
 import argparse
 
 rng = np.random.RandomState(int(time.time()))
+
+# for that one assert line out of nowhere?
+dictLen = None
 
 """
 following three functions:
@@ -229,7 +233,6 @@ class Watcher_train:
                 mask_x = mask_x[:, 0::2, 0::2]
 
         return dense_out, mask_x
-
 
 class Attender:
     def __init__(
@@ -670,8 +673,8 @@ class WAP:
         self, p, w, h, alpha, ctx0, h_0, k, maxlen, stochastic, session, training
     ):
 
-        global anno, infer_y, h_pre, alpha_past, if_trainning
-        
+        global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
+
         sample = []
         sample_score = []
 
@@ -721,7 +724,7 @@ class WAP:
                 ranks_flat = cand_flat.argsort()[: (k - dead_k)]
                 voc_size = next_p.shape[1]
 
-                assert voc_size == 111
+                assert voc_size == dictLen
 
                 trans_indices = ranks_flat // voc_size
                 word_indices = ranks_flat % voc_size
@@ -777,35 +780,23 @@ class WAP:
 
 
 def main(args):
-    global anno, infer_y, h_pre, alpha_past, if_trainning
-
+    global anno, infer_y, h_pre, alpha_past, if_trainning, dictLen
 
     worddicts = load_dict(args.dictPath)
+    dictLen = len(worddicts)
     worddicts_r = [None] * len(worddicts)
     for kk, vv in worddicts.items():
         worddicts_r[vv] = kk
 
-    train, train_uid_list = dataIterator(
-        args.trainPklPath,
-        args.trainCaptionPath,
+    test, test_uid_list = dataIterator(
+        args.testPklPath,
+        args.testCaptionPath,
         worddicts,
-        batch_size=args.batch_size,
-        batch_Imagesize=300000,
-        maxlen=50,
-        maxImagesize=300000,
-    )
-
-    valid, valid_uid_list = dataIterator(
-        args.validPklPath,
-        args.validCaptionPath,
-        worddicts,
-        batch_size=args.batch_size,
-        batch_Imagesize=300000,
-        maxlen=50,
-        maxImagesize=300000,
-    )
-
-    print("train lenght is ", len(train))
+        batch_size=2,
+        batch_Imagesize=400000,
+        maxlen=100,
+        maxImagesize=400000,
+    )       
 
     x = tf.placeholder(tf.float32, shape=[None, None, None, 1])
 
@@ -853,7 +844,7 @@ def main(args):
         256,
         256,
         annotation.shape.as_list()[3],
-        111,
+        dictLen,
         if_trainning,
     )
 
@@ -886,206 +877,114 @@ def main(args):
 
     init = tf.global_variables_initializer()
 
-    uidx = 0
-    cost_s = 0
-    dispFreq = 100 if args.dispFreq is None else args.dispFreq
-    saveFreq = len(train) if args.saveFreq is None else args.saveFreq
-    sampleFreq = len(train) if args.sampleFreq is None else args.sampleFreq
-    validFreq = len(train) if args.validFreq is None else args.validFreq
-    history_errs = []
-    estop = False
-    halfLrFlag = 0
-    patience = 15 if args.patience is not None else args.patience
-    lrate = 2e-4
-    logPath = "./log.txt" if args.logPath is None else args.logPath
-    log = open(logPath, "w")
+    saver = tf.train.Saver()
+
+    saver = tf.train.Saver()
 
     with tf.Session(config=config) as sess:
         sess.run(init)
-        for epoch in range(max_epoch):
-            n_samples = 0
-            random.shuffle(train)
-            for batch_x, batch_y in train:
-                batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(batch_x, batch_y)
-                n_samples += len(batch_x)
-                uidx += 1
+        saver.restore(sess, os.path.join(args.modelPath, args.modelFileName) + ".ckpt")
 
-                cost_i, _ = sess.run(
-                    [cost, trainer],
-                    feed_dict={
-                        x: batch_x,
-                        y: batch_y,
-                        x_mask: batch_x_m,
-                        y_mask: batch_y_m,
-                        if_trainning: True,
-                        lr: lrate,
-                    },
+        print("Start sampling...")
+        _t = time.time()
+        fpp_sample = open(os.path.join(args.resultPath, str(args.resultFileName) + ".txt"),"w",)
+        test_count_idx = 0
+        for batch_x, batch_y in test:
+            for xx in batch_x:
+                xx = np.moveaxis(xx, 0, -1)
+                xx_pad = np.zeros(
+                    (xx.shape[0], xx.shape[1], xx.shape[2]), dtype="float32"
                 )
-
-                cost_s += cost_i
-
-                if np.isnan(cost_i) or np.isinf(cost_i):
-                    print("invalid cost value detected")
-                    sys.exit(0)
-
-                if np.mod(uidx, dispFreq) == 0:
-                    cost_s /= dispFreq
-                    print(
-                        "Epoch ", epoch, "Update ", uidx, "Cost ", cost_s, "Lr ", lrate
-                    )
-                    log.write(
-                        "Epoch "
-                        + str(epoch)
-                        + " Update "
-                        + str(uidx)
-                        + " Cost "
-                        + str(cost_s)
-                        + " Lr "
-                        + str(lrate)
-                        + "\n"
-                    )
+                xx_pad[:, :, :] = xx / 255.0
+                xx_pad = xx_pad[None, :, :, :]
+                annot = sess.run(
+                    annotation, feed_dict={x: xx_pad, if_trainning: False}
+                )
+                h_state = sess.run(hidden_state_0, feed_dict={anno: annot})
+                sample, score = wap.get_sample(
+                    p,
+                    w,
+                    h,
+                    alpha,
+                    annot,
+                    h_state,
+                    10,
+                    100,
+                    False,
+                    sess,
+                    training=False,
+                )
+                score = score / np.array([len(s) for s in sample])
+                ss = sample[score.argmin()]
+                fpp_sample.write(test_uid_list[test_count_idx])
+                test_count_idx = test_count_idx + 1
+                if np.mod(test_count_idx, 100) == 0:
+                    print("gen %d samples" % test_count_idx)
+                    log.write("gen %d samples" % test_count_idx + "\n")
                     log.flush()
-                    cost_s = 0
+                for vv in ss:
+                    if vv == 0:  # <eol>
+                        break
+                    fpp_sample.write(" " + worddicts_r[vv])
+                fpp_sample.write("\n")
+        fpp_sample.close()
+        print("valid set decode done")
+        log.write("valid set decode done\n")
+        log.flush()
+        print("Done sampling, took" + str(time.time() - _t))
 
-                if np.mod(uidx, sampleFreq) == 0:
-                    fpp_sample = open("./result/valid_decode_result.txt", "w")
-                    valid_count_idx = 0
-                    for batch_x, batch_y in valid:
-                        for xx in batch_x:
-                            xx = np.moveaxis(xx, 0, -1)
-                            xx_pad = np.zeros(
-                                (xx.shape[0], xx.shape[1], xx.shape[2]), dtype="float32"
-                            )
-                            xx_pad[:, :, :] = xx / 255.0
-                            xx_pad = xx_pad[None, :, :, :]
-                            annot = sess.run(
-                                annotation, feed_dict={x: xx_pad, if_trainning: False}
-                            )
-                            h_state = sess.run(hidden_state_0, feed_dict={anno: annot})
-                            sample, score = wap.get_sample(
-                                p,
-                                w,
-                                h,
-                                alpha,
-                                annot,
-                                h_state,
-                                10,
-                                100,
-                                False,
-                                sess,
-                                training=False,
-                            )
-                            score = score / np.array([len(s) for s in sample])
-                            ss = sample[score.argmin()]
-                            fpp_sample.write(valid_uid_list[valid_count_idx])
-                            valid_count_idx = valid_count_idx + 1
-                            if np.mod(valid_count_idx, 100) == 0:
-                                print("gen %d samples" % valid_count_idx)
-                                log.write("gen %d samples" % valid_count_idx + "\n")
-                                log.flush()
-                            for vv in ss:
-                                if vv == 0:  # <eol>
-                                    break
-                                fpp_sample.write(" " + worddicts_r[vv])
-                            fpp_sample.write("\n")
-                    fpp_sample.close()
-                    print("valid set decode done")
-                    log.write("valid set decode done\n")
-                    log.flush()
 
-                if np.mod(uidx, validFreq) == 0:
-                    probs = []
-                    for batch_x, batch_y in valid:
-                        batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(
-                            batch_x, batch_y
-                        )
-                        pprobs, annot = sess.run(
-                            [cost, annotation],
-                            feed_dict={
-                                x: batch_x,
-                                y: batch_y,
-                                x_mask: batch_x_m,
-                                y_mask: batch_y_m,
-                                if_trainning: False,
-                            },
-                        )
-                        probs.append(pprobs)
-                    valid_errs = np.array(probs)
-                    valid_err_cost = valid_errs.mean()
-                    os.system(
-                        "python3.4 compute-wer.py "
-                        + "/result/valid_decode_result.txt"
-                        + " "
-                        + args.validCaptionPath
-                        + " "
-                        + args.path
-                        + "/result/valid.wer"
-                    )
-                    fpp = open("./result/valid.wer")
-                    stuff = fpp.readlines()
-                    fpp.close()
-                    m = re.search("WER (.*)\n", stuff[0])
-                    valid_per = 100.0 * float(m.group(1))
-                    m = re.search("ExpRate (.*)\n", stuff[1])
-                    valid_sacc = 100.0 * float(m.group(1))
-                    valid_err = valid_per
+        print("Start validating...")
+        _t = time.time()
+        probs = []
+        for batch_x, batch_y in test:
+            batch_x, batch_x_m, batch_y, batch_y_m = prepare_data(
+                batch_x, batch_y
+            )
+            pprobs, annot = sess.run(
+                [cost, annotation],
+                feed_dict={
+                    x: batch_x,
+                    y: batch_y,
+                    x_mask: batch_x_m,
+                    y_mask: batch_y_m,
+                    if_trainning: False,
+                },
+            )
+            probs.append(pprobs)
+        valid_errs = np.array(probs)
+        valid_err_cost = valid_errs.mean()
+        wer_process(
+            os.path.join(args.resultPath, args.resultFileName + ".txt"),
+            args.validCaptionPath,
+            os.path.join(args.resultPath, args.resultFileName + ".wer"),
+        )
+        fpp = open(os.path.join(args.resultPath, f"{args.resultFileName}.wer"))
+        stuff = fpp.readlines()
+        fpp.close()
+        m = re.search("WER (.*)\n", stuff[0])
+        test_per = 100.0 * float(m.group(1))
+        m = re.search("ExpRate (.*)\n", stuff[1])
+        test_sacc = 100.0 * float(m.group(1))
+        test_err = test_per
 
-                    history_errs.append(valid_err)
-
-                    if (
-                        uidx / validFreq == 0
-                        or valid_err <= np.array(history_errs).min()
-                    ):
-                        bad_counter = 0
-
-                    if (
-                        uidx / validFreq != 0
-                        and valid_err > np.array(history_errs).min()
-                    ):
-                        bad_counter += 1
-                        if bad_counter > patience:
-                            if halfLrFlag == 2:
-                                print("Early Stop!")
-                                log.write("Early Stop!\n")
-                                log.flush()
-                                estop = True
-                                break
-                            else:
-                                print("Lr decay and retrain!")
-                                log.write("Lr decay and retrain!\n")
-                                log.flush()
-                                bad_counter = 0
-                                lrate = lrate / 10
-                                halfLrFlag += 1
-
-                    print(
-                        "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
-                        % (valid_per, valid_sacc, valid_err_cost)
-                    )
-                    log.write(
-                        "Valid WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
-                        % (valid_per, valid_sacc, valid_err_cost)
-                        + "\n"
-                    )
-                    log.flush()
-            if estop:
-                break
+        print(
+            "Test WER: %.2f%%, ExpRate: %.2f%%, Cost: %f"
+            % (test_per, test_sacc, test_err_cost)
+        )
+        print(f"Done validating, took {time.time() - _t}.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dictPath", type=str)
-    parser.add_argument("trainPklPath", type=str)
-    parser.add_argument("trainCaptionPath", type=str)
-    parser.add_argument("validPklPath", type=str)
-    parser.add_argument("validCaptionPath", type=str)
-    parser.add_argument("--logPath", type=str)
-    parser.add_argument("--batch_size", type=int, default=6)
-    parser.add_argument("--dispFreq", type=int)
-    parser.add_argument("--saveFreq", type=int)
-    parser.add_argument("--sampleFreq", type=int)
-    parser.add_argument("--validFreq", type=int)
-    parser.add_argument("--patience", type=int)
+    parser.add_argument("testPklPath", type=str)
+    parser.add_argument("testCaptionPath", type=str)
+    parser.add_argument("resultPath", type=str)
+    parser.add_argument("modelFileName", type=str)
+    parser.add_argument("--modelPath", type=str, default="./trained/")
+    parser.add_argument("--resultFileName", type=str, default="test")
     (args, unknown) = parser.parse_known_args()
+    print("Run with args " + str(vars(args)))
     main(args)
 
